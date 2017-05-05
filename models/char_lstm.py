@@ -7,7 +7,7 @@ import torchvision.models as models
 import torch.nn as nn
 
 class CharLstm(nn.Module):
-    def __init__(self, params)
+    def __init__(self, params):
         super(RNNModel, self).__init__()
         self.output_size = params.get('vocabulary_size',-1)
         self.num_output_layers = params.get('num_output_layers',1)
