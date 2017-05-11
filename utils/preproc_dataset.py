@@ -8,7 +8,7 @@ import io
 from collections import Counter
 import re
 
-def preproc_dataset(src_path, output_path, frac_test = 0.15, frac_val = 0.1)
+def preproc_dataset(src_path, output_path, frac_test = 0.15, frac_val = 0.1):
     authors = {}
     frac_test = 0.15
     frac_val = 0.1
