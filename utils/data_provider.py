@@ -7,6 +7,7 @@ from collections import Counter
 import torch
 from torch import tensor
 import numpy as np
+import random
 
 class DataProvider():
 
@@ -28,20 +29,43 @@ class DataProvider():
 
         return
 
+    def get_random_string(self, slen = 10, split='train', author=None):
+        if author == None:
+            author = random.choice(self.data['author-data'].keys())
+
+        good_ids = list(set(self.splits[split]).intersection(set(self.data['author-data'][author]['idces'])))
+        assert(len(good_ids)>0)
+
+        idx = np.random.choice(good_ids,1)
+
+        text = self.data['docs'][idx]['text']
+        start_pos = np.random.randint(1,len(text)-slen)
+
+        batch = []
+        targ = text[start_pos:start_pos+slen]
+        inp = text[start_pos-1:start_pos+slen-1]
+        batch = [{'in':inp,'targ': targ, 'author': author}]
+        return batch
+
+
+
     def iter_single_doc(self, split='train', max_docs=-1):
         # Since this is a standalone interation usually run to completion
         # we want to have a seperate temporary doc pointers here.
         cur_char_idx = np.ones(len(self.data['docs']),dtype=np.int)
+        if max_docs > 0:
+            idxes = np.random.choice(self.splits[split],max_docs)
+        else:
+            idxes = self.splits[split]
 
-        for i,cid in enumerate(self.splits[split]):
-            if max_docs>= 0 and i >= max_docs:
-                break
+
+        for i,cid in enumerate(idxes):
             dead = False
             while not dead:
                 batch = []
                 inp, targ, dead, cur_char_idx = self.get_nextstring_doc(cid, cur_char_idx)
                 batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author']})
-                yield batch
+                yield batch, dead
 
     def get_nextstring_doc(self, i, cur_char_idx, maxlen=-1):
         maxlen = self.max_seq_len if maxlen==-1 else maxlen
@@ -80,7 +104,7 @@ class DataProvider():
 
         return batch, dead_ids
 
-    def prepare_data(self, batch, char_to_ix, auth_to_ix):
+    def prepare_data(self, batch, char_to_ix, auth_to_ix, leakage = 0.):
         inp_seqs = []
         targ_seqs = []
         lens = []
@@ -90,13 +114,16 @@ class DataProvider():
             inp_seqs.append([char_to_ix[c] for c in b['in'] if c in char_to_ix])
             targ_seqs.append([char_to_ix[c] for c in b['targ'] if c in char_to_ix])
             lens.append(len(inp_seqs[-1]))
+            # Sometimes either the targ or inp might lose a character (OOV)
+            # Handle that situation here.
             if len(targ_seqs[-1]) != lens[-1]:
                 if len(targ_seqs[-1]) < lens[-1]:
                     targ_seqs[-1].append(0)
                 else:
-                    inp_seqs[-1].append(0)
+                    inp_seqs[-1].insert(0,0)
                     lens[-1] = lens[-1] + 1
-            auths.append(auth_to_ix[b['author']])
+            authidx = auth_to_ix[b['author']] if np.random.rand() >= leakage else np.random.choice(auth_to_ix.values())
+            auths.append(authidx)
 
         # pad the sequences
         max_len = max(lens)
@@ -136,4 +163,5 @@ class DataProvider():
             if vocab[c] >= threshold:
                 minivocab[c] = len(minivocab) +1
                 ixtochar[minivocab[c]] = c
+        print 'Vocabulary size is %d'%(len(minivocab))
         return minivocab, ixtochar

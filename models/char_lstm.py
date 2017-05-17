@@ -24,7 +24,7 @@ class CharLstm(nn.Module):
         # Initialize the model layers
         # Embedding layer
         self.encoder = nn.Embedding(self.output_size, self.emb_size, padding_idx=0)
-        self.enc_drop = nn.Dropout(p=params.get('enc_drop_prob',0.25))
+        self.enc_drop = nn.Dropout(p=params.get('drop_prob_encoder',0.25))
 
         # Lstm Layers
         if self.en_residual:
@@ -39,9 +39,10 @@ class CharLstm(nn.Module):
 
         #self.decoder = nn.ModuleList([nn.Linear(self.hidden_size,self.output_size) for i in
         #                             xrange(self.num_output_layers)])
-        self.dec_drop = nn.Dropout(p=params.get('dec_drop_prob',0.25))
+        self.dec_drop = nn.Dropout(p=params.get('drop_prob_decoder',0.25))
 
-        self.softmax = nn.Softmax()
+        self.softmax = nn.LogSoftmax()
+        #self.softmax = nn.Softmax()
 
         self.init_weights()
         # we should move it out so that whether to do cuda or not should be upto the user.
@@ -70,15 +71,7 @@ class CharLstm(nn.Module):
         return (Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()),
                     Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()))
 
-
-    def forward(self, x, lengths, h_prev, target_head, compute_softmax = False):
-        # x should be a numpy array of n_seq x n_batch dimensions
-        b_sz = x.size(1)
-        n_steps = x.size(0)
-        x = Variable(x).cuda()
-        emb = self.enc_drop(self.encoder(x))
-        packed = pack_padded_sequence(emb, lengths)
-
+    def _my_recurrent_layer(self, packed, h_prev):
         if self.en_residual:
             p_out = packed
             hid_all = []
@@ -94,6 +87,17 @@ class CharLstm(nn.Module):
             rnn_out = p_out
         else:
             rnn_out, hidden = self.rec_layers(packed, h_prev)
+        return rnn_out, hidden
+
+    def forward(self, x, lengths, h_prev, target_head, compute_softmax = False):
+        # x should be a numpy array of n_seq x n_batch dimensions
+        b_sz = x.size(1)
+        n_steps = x.size(0)
+        x = Variable(x).cuda()
+        emb = self.enc_drop(self.encoder(x))
+        packed = pack_padded_sequence(emb, lengths)
+
+        rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
 
         rnn_out_unp = pad_packed_sequence(rnn_out)
         rnn_out = self.dec_drop(rnn_out_unp[0])
@@ -112,3 +116,73 @@ class CharLstm(nn.Module):
             prob_out = dec_out
 
         return prob_out, hidden
+
+    def forward_eval(self, x, h_prev, compute_softmax = True):
+        # x should be a numpy array of n_seq x n_batch dimensions
+        # In this case batch will be a single sequence.
+        n_auth = self.num_output_layers
+        n_steps = x.size(0)
+        x = Variable(x,volatile=True).cuda()
+        # No Dropout needed
+        emb = self.encoder(x)
+        # No need for any packing here
+        packed = emb
+
+        rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
+
+        # implement the multi-headed RNN.
+        rnn_out = rnn_out.expand(n_steps, n_auth, self.hidden_size)
+        W = self.decoder_W
+
+        # reshape and expand b to size (n_auth*n_steps*vocab_size)
+        b = self.decoder_b.view(n_auth, -1, self.output_size).expand(n_auth, n_steps, self.output_size)
+
+        # output is size seq * batch_size * vocab
+        dec_out = torch.baddbmm(b, rnn_out.transpose(0,1), W).transpose(0,1)
+
+        if compute_softmax:
+            prob_out = self.softmax(dec_out.contiguous().view(-1, self.output_size)).view(n_steps, n_auth, self.output_size)
+        else:
+            prob_out = dec_out
+
+        return prob_out, hidden
+
+    def forward_gen(self, x, h_prev, target_auth, n_max = 100, end_c = -1):
+        # Sample n_max characters give the hidden state and initial seed x.  Seed should have
+        # atleast one character (eg. begin doc char), h_prev can be zeros. x is assumed to be
+        # n_steps x 1 dimensional, i.e only one sample string generation at a time. Generation is
+        # done using target author.
+
+        n_auth = self.num_output_layers
+        n_steps = x.size(0)
+        x = Variable(x,volatile=True).cuda()
+        emb = self.encoder(x)
+        # No need for any packing here
+        packed = emb
+
+        # Feed in the seed string. We are not intersted in these outputs except for the last one.
+        rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
+
+        W = self.decoder_W[target_auth.cuda()][0]
+        # reshape and expand b to size (batch*n_steps*vocab_size)
+        b = self.decoder_b[target_auth.cuda()].view(1, self.output_size)
+
+        p_rnn = rnn_out[-1]
+        char_out = []
+
+        for i in xrange(n_max):
+            # output is size seq * batch_size * vocab
+            dec_out = p_rnn.mm(W) + b
+            max_sc, pred_c = dec_out.max(dim=-1)
+            char_out.append(pred_c)
+
+            if 0:#pred_c == end_c:
+                break
+            else:
+                emb = self.encoder(pred_c)
+                # No need for any packing here
+                packed = emb
+                p_rnn, hidden = self._my_recurrent_layer(packed, hidden)
+                p_rnn = p_rnn[-1]
+
+        return char_out
