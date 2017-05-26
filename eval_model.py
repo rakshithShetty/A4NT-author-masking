@@ -6,7 +6,7 @@ import os
 from models.char_lstm import CharLstm
 from collections import defaultdict
 from utils.data_provider import DataProvider
-from utils.utils import repackage_hidden, eval_model
+from utils.utils import repackage_hidden, eval_model, eval_classify
 
 import torch
 import torch.nn as nn
@@ -31,7 +31,9 @@ def main(params):
     # Restore saved checkpoint
     model.load_state_dict(saved_model['state_dict'])
 
-    score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split=params['split'], max_docs = params['num_eval'])
+    eval_function = eval_model if cp_params['mode'] == 'generative' else eval_classify
+
+    score = eval_function(dp, model, cp_params, char_to_ix, auth_to_ix, split=params['split'], max_docs = params['num_eval'])
 
 if __name__ == "__main__":
 

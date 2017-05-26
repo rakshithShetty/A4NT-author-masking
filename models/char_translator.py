@@ -10,9 +10,9 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch import tensor
 
 
-class CharLstm(nn.Module):
+class CharTranslator(nn.Module):
     def __init__(self, params):
-        super(CharLstm, self).__init__()
+        super(CharTranslator, self).__init__()
         #+1 is to allow padding index
         self.output_size = params.get('vocabulary_size',-1) + 1
         self.num_output_layers = params.get('num_output_layers',1)
@@ -35,14 +35,9 @@ class CharLstm(nn.Module):
         self.max_pool_rnn = params.get('maxpoolrnn',0)
 
         # Output decoder layer
-        if params.get('mode','generative')=='classifier':
-            self.decoder_W = nn.Parameter(torch.zeros([self.hidden_size*(1+self.max_pool_rnn),
-                self.num_output_layers]), True)
-            self.decoder_b = nn.Parameter(torch.zeros([self.num_output_layers]), True)
-        else:
-            self.decoder_W = nn.Parameter(torch.zeros([self.num_output_layers, self.hidden_size,
-                self.output_size]), True)
-            self.decoder_b = nn.Parameter(torch.zeros([self.num_output_layers, self.output_size]), True)
+        self.decoder_W = nn.Parameter(torch.zeros([self.hidden_size,
+            self.output_size]), True)
+        self.decoder_b = nn.Parameter(torch.zeros([self.output_size]), True)
 
         #self.decoder = nn.ModuleList([nn.Linear(self.hidden_size,self.output_size) for i in
         #                             xrange(self.num_output_layers)])
@@ -67,12 +62,12 @@ class CharLstm(nn.Module):
         # LSTM forget gate could be initialized to high value (1.)
         if self.en_residual:
           for i in xrange(self.num_rec_layers):
-            self.rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
-            self.rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
+            self.rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
+            self.rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
         else:
           for i in xrange(self.num_rec_layers):
-            getattr(self.rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 0.)
-            getattr(self.rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 0.)
+            getattr(self.rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
+            getattr(self.rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
 
     def init_hidden(self, bsz):
         # Weight initializations for various parts.
@@ -98,7 +93,7 @@ class CharLstm(nn.Module):
             rnn_out, hidden = self.rec_layers(packed, h_prev)
         return rnn_out, hidden
 
-    def forward(self, x, lengths, h_prev, target_head, compute_softmax = False):
+    def forward_mltrain(self, x, lengths, h_prev, target_head, compute_softmax = False):
         # x should be a numpy array of n_seq x n_batch dimensions
         b_sz = x.size(1)
         n_steps = x.size(0)
@@ -112,45 +107,15 @@ class CharLstm(nn.Module):
         rnn_out = self.dec_drop(rnn_out_unp[0])
 
         # implement the multi-headed RNN.
-        W = self.decoder_W[target_head.cuda()]
+        W = self.decoder_W
         # reshape and expand b to size (batch*n_steps*vocab_size)
-        b = self.decoder_b[target_head.cuda()].view(b_sz, -1, self.output_size)
+        b = self.decoder_b.view(1, 1, self.output_size)
         b = b.expand(b_sz, x.size(0), self.output_size)
         # output is size seq * batch_size * vocab
         dec_out = torch.baddbmm(b, rnn_out.transpose(0,1), W).transpose(0,1)
 
         if compute_softmax:
             prob_out = self.softmax(dec_out.view(-1, self.output_size)).view(n_steps, b_sz, self.output_size)
-        else:
-            prob_out = dec_out
-
-        return prob_out, hidden
-
-    def forward_eval(self, x, h_prev, compute_softmax = True):
-        # x should be a numpy array of n_seq x n_batch dimensions
-        # In this case batch will be a single sequence.
-        n_auth = self.num_output_layers
-        n_steps = x.size(0)
-        x = Variable(x,volatile=True).cuda()
-        # No Dropout needed
-        emb = self.encoder(x)
-        # No need for any packing here
-        packed = emb
-
-        rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
-
-        # implement the multi-headed RNN.
-        rnn_out = rnn_out.expand(n_steps, n_auth, self.hidden_size)
-        W = self.decoder_W
-
-        # reshape and expand b to size (n_auth*n_steps*vocab_size)
-        b = self.decoder_b.view(n_auth, -1, self.output_size).expand(n_auth, n_steps, self.output_size)
-
-        # output is size seq * batch_size * vocab
-        dec_out = torch.baddbmm(b, rnn_out.transpose(0,1), W).transpose(0,1)
-
-        if compute_softmax:
-            prob_out = self.softmax(dec_out.contiguous().view(-1, self.output_size)).view(n_steps, n_auth, self.output_size)
         else:
             prob_out = dec_out
 
@@ -184,6 +149,7 @@ class CharLstm(nn.Module):
             dec_out = p_rnn.mm(W) + b
             max_sc, pred_c = dec_out.max(dim=-1)
             char_out.append(pred_c)
+
             if 0:#pred_c == end_c:
                 break
             else:
@@ -194,40 +160,3 @@ class CharLstm(nn.Module):
                 p_rnn = p_rnn[-1]
 
         return char_out
-
-    def forward_classify(self, x, h_prev, compute_softmax = False, predict_mode=False):
-        # x should be a numpy array of n_seq x n_batch dimensions
-        # In this case batch will be a single sequence.
-        n_auth = self.num_output_layers
-        n_steps = x.size(0)
-        if predict_mode:
-            x = Variable(x,volatile=True).cuda()
-        else:
-            x = Variable(x).cuda()
-
-        b_sz = x.size(1)
-        # No Dropout needed
-        emb = self.enc_drop(self.encoder(x))
-        # No need for any packing here
-        packed = emb
-
-        rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
-        # implement the multi-headed RNN.
-        if self.max_pool_rnn:
-            rnn_out = self.dec_drop(torch.cat([torch.mean(rnn_out,dim=0,keepdim=False), rnn_out[-1]],
-                dim=-1))
-        else:
-            rnn_out = self.dec_drop(rnn_out[-1])
-
-        W = self.decoder_W
-        # reshape and expand b to size (n_auth*n_steps*vocab_size)
-        b = self.decoder_b.expand(b_sz, self.num_output_layers)
-
-        dec_out = rnn_out.mm(W) + b
-
-        if compute_softmax:
-            prob_out = self.softmax(dec_out.contiguous().view(-1, self.num_output_layers))
-        else:
-            prob_out = dec_out
-
-        return prob_out, hidden

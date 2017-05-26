@@ -23,11 +23,31 @@ class DataProvider():
         for i,dc in enumerate(self.data['docs']):
             self.splits[dc['split']].append(i)
 
+        self.cur_batch = np.array([-1]*params.get('batch_size',1),dtype=np.int)
+        self.max_seq_len = params.get('max_seq_len',100)
+
+        # Some caching to track the current character index in the document and
+        # hidden states associated with that. (Not sure if hidden states are still
+        # relavant, they might need to be forgotten, esp. when network in changing
+        # rapidly during initial stages of training.
         self.cur_char_idx = np.ones(len(self.data['docs']),dtype=np.int)
-        self.cur_batch = np.array([-1]*params['batch_size'],dtype=np.int)
-        self.max_seq_len = params['max_seq_len']
+
+        self.hid_cache = {}
 
         return
+
+    def set_hid_cache(self, idces, hid_state):
+        # Limit the indexing to max items in hidden_states.
+        #This allows setting multiple indices tosame vector
+        n_hid = hid_state[0].data.size()[1]
+        for i,cid in enumerate(idces):
+            self.hid_cache[cid] = [torch.index_select(hd.data,1,torch.LongTensor([min(i,n_hid-1)]).cuda()) for hd in hid_state]
+        return
+
+    def get_hid_cache(self, idces, hid_state):
+        for i in xrange(len(hid_state)):
+            hid_state[i].data = torch.cat([self.hid_cache[cid][i] for cid in idces],dim=1)
+        return hid_state
 
     def get_random_string(self, slen = 10, split='train', author=None):
         if author == None:
@@ -46,8 +66,6 @@ class DataProvider():
         inp = text[start_pos-1:start_pos+slen-1]
         batch = [{'in':inp,'targ': targ, 'author': author}]
         return batch
-
-
 
     def iter_single_doc(self, split='train', max_docs=-1):
         # Since this is a standalone interation usually run to completion
@@ -100,9 +118,22 @@ class DataProvider():
         for i,cid in enumerate(self.cur_batch):
             inp, targ, dead, self.cur_char_idx = self.get_nextstring_doc(cid, self.cur_char_idx)
             self.cur_batch[i] = -1 if dead else cid
-            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author']})
+            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'],'id':cid})
 
         return batch, dead_ids
+
+    def get_rand_doc_batch(self, batch_size, split='train'):
+        batch_ids = np.random.choice(self.splits[split], batch_size, replace=False)
+        batch = []
+        dead_ids_next_it = []
+        for i,cid in enumerate(batch_ids):
+            inp, targ, dead, self.cur_char_idx = self.get_nextstring_doc(cid, self.cur_char_idx)
+            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'],
+                'id':cid})
+            if dead:
+                dead_ids_next_it.append(i)
+
+        return batch, dead_ids_next_it
 
     def prepare_data(self, batch, char_to_ix, auth_to_ix, leakage = 0.):
         inp_seqs = []
@@ -122,7 +153,7 @@ class DataProvider():
                 else:
                     inp_seqs[-1].insert(0,0)
                     lens[-1] = lens[-1] + 1
-            authidx = auth_to_ix[b['author']] if np.random.rand() >= leakage else np.random.choice(auth_to_ix.values())
+            authidx = auth_to_ix[b['author']] if np.random.rand() > leakage else np.random.choice(auth_to_ix.values())
             auths.append(authidx)
 
         # pad the sequences
