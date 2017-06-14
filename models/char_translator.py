@@ -14,33 +14,48 @@ class CharTranslator(nn.Module):
     def __init__(self, params):
         super(CharTranslator, self).__init__()
         #+1 is to allow padding index
-        self.output_size = params.get('vocabulary_size',-1) + 1
-        self.num_output_layers = params.get('num_output_layers',1)
-        self.num_rec_layers = params.get('hidden_depth',-1)
+        self.vocab_size = params.get('vocabulary_size',-1) + 1
+
+        self.enc_num_rec_layers = params.get('enc_hidden_depth',-1)
+        self.dec_num_rec_layers = params.get('dec_hidden_depth',-1)
+
         self.emb_size = params.get('embedding_size',-1)
-        self.hidden_size = params.get('hidden_size',-1)
+        self.enc_hidden_size = params.get('enc_hidden_size',-1)
+        self.dec_hidden_size = params.get('dec_hidden_size',-1)
         self.en_residual = params.get('en_residual_conn',1)
 
         # Initialize the model layers
         # Embedding layer
-        self.encoder = nn.Embedding(self.output_size, self.emb_size, padding_idx=0)
+        self.char_emb = nn.Embedding(self.vocab_size, self.emb_size, padding_idx=0)
+        self.emb_drop = nn.Dropout(p=params.get('drop_prob_emb',0.25))
+
         self.enc_drop = nn.Dropout(p=params.get('drop_prob_encoder',0.25))
-
-        # Lstm Layers
-        if self.en_residual:
-            self.rec_layers = nn.ModuleList([nn.LSTM(self.emb_size, self.hidden_size, 1) for i in xrange(self.num_rec_layers)])
-        else:
-            self.rec_layers = nn.LSTM(self.emb_size, self.hidden_size, self.num_rec_layers)
-
         self.max_pool_rnn = params.get('maxpoolrnn',0)
 
-        # Output decoder layer
-        self.decoder_W = nn.Parameter(torch.zeros([self.hidden_size,
-            self.output_size]), True)
-        self.decoder_b = nn.Parameter(torch.zeros([self.output_size]), True)
+        # Translator consists of an encoder - attention layer - decoder
+        # Encoder is an lstm network with which takes character embedding vectors as input
+        # Decoder is an lstm network which takes hidden states from encoder as input and
+        # outputs series of characters
 
-        #self.decoder = nn.ModuleList([nn.Linear(self.hidden_size,self.output_size) for i in
-        #                             xrange(self.num_output_layers)])
+        # Encoder Lstm Layers
+        if self.en_residual:
+            self.enc_rec_layers = nn.ModuleList([nn.LSTM(self.emb_size, self.enc_hidden_size, 1) for i in xrange(self.enc_num_rec_layers)])
+        else:
+            self.enc_rec_layers = nn.LSTM(self.emb_size, self.enc_hidden_size, self.enc_num_rec_layers)
+
+        self.pool_enc = params.get('maxpoolrnn',0)
+
+        # Decoder Lstm Layers
+        if self.en_residual:
+            self.dec_rec_layers = nn.ModuleList([nn.LSTM((self.enc_hidden_size*(1+self.max_pool_rnn)+self.emb_size), self.dec_hidden_size, 1) for i in xrange(self.dec_num_rec_layers)])
+        else:
+            self.dec_rec_layers = nn.LSTM(self.enc_hidden_size*(1+self.max_pool_rnn)+ self.emb_size, self.dec_hidden_size, self.dec_num_rec_layers)
+
+        # Output decoder layer
+        self.decoder_W = nn.Parameter(torch.zeros([self.dec_hidden_size,
+            self.vocab_size]), True)
+        self.decoder_b = nn.Parameter(torch.zeros([self.vocab_size]), True)
+
         self.dec_drop = nn.Dropout(p=params.get('drop_prob_decoder',0.25))
 
         if params['mode']=='generative' or 1:
@@ -54,33 +69,42 @@ class CharTranslator(nn.Module):
 
     def init_weights(self):
         # Weight initializations for various parts.
-        a = 0.01
+        a = 0.001
         self.decoder_W.data.uniform_(-a, a)
         #self.encoder.weight.data.uniform_(-a, a)
         self.decoder_b.data.fill_(0)
-        h_sz = self.hidden_size
+        enc_h_sz = self.enc_hidden_size
+        dec_h_sz = self.dec_hidden_size
         # LSTM forget gate could be initialized to high value (1.)
         if self.en_residual:
-          for i in xrange(self.num_rec_layers):
-            self.rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
-            self.rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
+          for i in xrange(self.enc_num_rec_layers):
+            self.enc_rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+            self.enc_rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+          for i in xrange(self.dec_num_rec_layers):
+            self.dec_rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
+            self.dec_rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
         else:
-          for i in xrange(self.num_rec_layers):
-            getattr(self.rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
-            getattr(self.rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 1.)
+          for i in xrange(self.enc_num_rec_layers):
+            getattr(self.enc_rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+            getattr(self.enc_rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+
+          for i in xrange(self.dec_num_rec_layers):
+            getattr(self.dec_rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
+            getattr(self.dec_rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
 
     def init_hidden(self, bsz):
         # Weight initializations for various parts.
         weight = next(self.parameters()).data
-        return (Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()),
-                    Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()))
+        return (Variable(weight.new(self.enc_num_rec_layers, bsz, self.enc_hidden_size).zero_()),
+                    Variable(weight.new(self.enc_num_rec_layers, bsz, self.enc_hidden_size).zero_()))
 
-    def _my_recurrent_layer(self, packed, h_prev):
+    def _my_recurrent_layer(self, packed, h_prev=None, rec_func=None, n_layers=1.):
         if self.en_residual:
             p_out = packed
             hid_all = []
-            for i in xrange(self.num_rec_layers):
-                out, hid = self.rec_layers[i](p_out, (h_prev[0][i:i+1], h_prev[1][i:i+1]))
+            rec_func = self.rec_layers if rec_func == None else rec_func
+            for i in xrange(n_layers):
+                out, hid = rec_func[i](p_out, (h_prev[0][i:i+1], h_prev[1][i:i+1]))
                 if i > 0:
                     # Add residual connections after every layer
                     p_out = p_out + out
@@ -90,36 +114,66 @@ class CharTranslator(nn.Module):
             hidden = (torch.cat([hid[0] for hid in hid_all],dim=-1), torch.cat([hid[1] for hid in hid_all],dim=-1))
             rnn_out = p_out
         else:
-            rnn_out, hidden = self.rec_layers(packed, h_prev)
+            if h_prev == None:
+                rnn_out, hidden = rec_func(packed)
+            else:
+                rnn_out, hidden = rec_func(packed, h_prev)
         return rnn_out, hidden
 
-    def forward_mltrain(self, x, lengths, h_prev, target_head, compute_softmax = False):
+    def forward_mltrain(self, inp, lengths_inp, targ, lengths_targ, h_prev, compute_softmax = False):
         # x should be a numpy array of n_seq x n_batch dimensions
-        b_sz = x.size(1)
-        n_steps = x.size(0)
-        x = Variable(x).cuda()
-        emb = self.enc_drop(self.encoder(x))
-        packed = pack_padded_sequence(emb, lengths)
+        b_sz = inp.size(1)
+        n_steps = inp.size(0)
+        inp = Variable(inp).cuda()
 
-        rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
+        # Embed the sequence of characters
+        emb = self.emb_drop(self.char_emb(inp))
+        packed = pack_padded_sequence(emb, lengths_inp)
 
-        rnn_out_unp = pad_packed_sequence(rnn_out)
-        rnn_out = self.dec_drop(rnn_out_unp[0])
+        # Encode the sequence of input characters
+        enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
+
+        enc_rnn_out_unp = pad_packed_sequence(enc_rnn_out)
+        enc_rnn_out = self.enc_drop(enc_rnn_out_unp[0])
+
+        if self.max_pool_rnn:
+            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][0]],
+                dim=-1)
+        else:
+            ctxt = enc_hidden[0][0]
+
+        # Setup target variable now
+        targ = Variable(targ).cuda()
+        targ_emb = self.emb_drop(self.char_emb(targ))
+        # Concat the context vector from the encoder
+        n_steps_targ = targ.size(0)
+
+        dec_inp = torch.cat([ctxt.expand(n_steps_targ,b_sz,ctxt.size(1)), targ_emb], dim=-1)
+
+        targ_packed = pack_padded_sequence(dec_inp, lengths_targ)
+
+
+        # Decode the output sequence using encoder state
+        dec_rnn_out, dec_hidden = self._my_recurrent_layer(targ_packed, h_prev=None, rec_func = self.dec_rec_layers,
+                n_layers = self.dec_num_rec_layers)
+
+        dec_out_unp = pad_packed_sequence(dec_rnn_out)
+        dec_out = self.dec_drop(dec_out_unp[0])
 
         # implement the multi-headed RNN.
         W = self.decoder_W
         # reshape and expand b to size (batch*n_steps*vocab_size)
-        b = self.decoder_b.view(1, 1, self.output_size)
-        b = b.expand(b_sz, x.size(0), self.output_size)
+        b = self.decoder_b.view(1, self.vocab_size)
+        b = b.expand(b_sz*n_steps_targ, self.vocab_size)
         # output is size seq * batch_size * vocab
-        dec_out = torch.baddbmm(b, rnn_out.transpose(0,1), W).transpose(0,1)
+        score_out = dec_out.view(n_steps_targ*b_sz,-1).mm(W) + b
 
         if compute_softmax:
-            prob_out = self.softmax(dec_out.view(-1, self.output_size)).view(n_steps, b_sz, self.output_size)
+            prob_out = self.softmax(score_out).view(n_steps_targ, b_sz, self.vocab_size)
         else:
-            prob_out = dec_out
+            prob_out = score_out.view(n_steps_targ, b_sz, self.vocab_size)
 
-        return prob_out, hidden
+        return prob_out, (enc_hidden, dec_hidden)
 
     def forward_gen(self, x, h_prev, target_auth, n_max = 100, end_c = -1):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
@@ -127,21 +181,36 @@ class CharTranslator(nn.Module):
         # n_steps x 1 dimensional, i.e only one sample string generation at a time. Generation is
         # done using target author.
 
-        n_auth = self.num_output_layers
         n_steps = x.size(0)
         x = Variable(x,volatile=True).cuda()
-        emb = self.encoder(x)
-        # No need for any packing here
+
+        emb = self.emb_drop(self.char_emb(x))
         packed = emb
 
-        # Feed in the seed string. We are not intersted in these outputs except for the last one.
-        rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
+        # Encode the sequence of input characters
+        enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
 
-        W = self.decoder_W[target_auth.cuda()][0]
+        if self.max_pool_rnn:
+            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][0]],
+                dim=-1)
+        else:
+            ctxt = enc_hidden[0][0]
+
+        targ_init = x[0]
+        targ_emb = self.char_emb(targ_init)
+
+        dec_inp = torch.cat([ctxt, targ_emb], dim=-1)
+
+        # Decode the output sequence using encoder state
+        dec_rnn_out, dec_hidden = self._my_recurrent_layer(dec_inp.view(1,1,-1), h_prev=None, rec_func = self.dec_rec_layers,
+                n_layers = self.dec_num_rec_layers)
+
+        # implement the multi-headed RNN.
+        W = self.decoder_W
         # reshape and expand b to size (batch*n_steps*vocab_size)
-        b = self.decoder_b[target_auth.cuda()].view(1, self.output_size)
+        b = self.decoder_b.view(1, self.vocab_size)
 
-        p_rnn = rnn_out[-1]
+        p_rnn = dec_rnn_out[-1]
         char_out = []
 
         for i in xrange(n_max):
@@ -149,14 +218,13 @@ class CharTranslator(nn.Module):
             dec_out = p_rnn.mm(W) + b
             max_sc, pred_c = dec_out.max(dim=-1)
             char_out.append(pred_c)
-
-            if 0:#pred_c == end_c:
+            if (pred_c == end_c).data[0][0]:
                 break
             else:
-                emb = self.encoder(pred_c)
+                emb = self.char_emb(pred_c)
                 # No need for any packing here
-                packed = emb
-                p_rnn, hidden = self._my_recurrent_layer(packed, hidden)
+                dec_inp = torch.cat([ctxt.view(1,1,-1), emb], dim=-1)
+                p_rnn, dec_hidden = self._my_recurrent_layer(dec_inp, dec_hidden, rec_func = self.dec_rec_layers, n_layers = self.dec_num_rec_layers)
                 p_rnn = p_rnn[-1]
 
         return char_out

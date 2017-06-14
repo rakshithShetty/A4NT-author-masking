@@ -4,9 +4,10 @@ import time
 import numpy as np
 import os
 from models.char_lstm import CharLstm
+from models.char_translator import CharTranslator
 from collections import defaultdict
 from utils.data_provider import DataProvider
-from utils.utils import repackage_hidden, eval_model, eval_classify
+from utils.utils import repackage_hidden, eval_translator, eval_classify
 from torch.autograd import Variable
 
 import torch
@@ -19,7 +20,7 @@ def nll_loss(outputs, targets):
     return torch.gather(outputs, 1, targets.view(-1,1))
 
 def save_checkpoint(state, fappend ='dummy', outdir = 'cv'):
-    filename = os.path.join(outdir,'checkpoint_'+fappend+'_'+'%.2f'%(state['val_mean_rank'])+'.pth.tar')
+    filename = os.path.join(outdir,'checkpoint_translate_'+fappend+'_'+'%.2f'%(state['val_pplx'])+'.pth.tar')
     torch.save(state, filename)
 
 def main(params):
@@ -28,7 +29,10 @@ def main(params):
 
     # Create vocabulary and author index
     if params['resume'] == None:
-        char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
+        if params['atoms'] == 'char':
+            char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
+        else:
+            char_to_ix, ix_to_char = dp.createWordVocab(params['vocab_threshold'])
         auth_to_ix = dp.createAuthorIdx()
     else:
         saved_model = torch.load(params['resume'])
@@ -39,7 +43,7 @@ def main(params):
     params['vocabulary_size'] = len(char_to_ix)
     params['num_output_layers'] = len(auth_to_ix)
 
-    model = CharLstm(params)
+    model = CharTranslator(params)
     # set to train mode, this activates dropout
     model.train()
     #Initialize the RMSprop optimizer
@@ -70,7 +74,7 @@ def main(params):
 
     # Compute the iteration parameters
     epochs = params['max_epochs']
-    total_seqs = dp.get_num_seqs(maxlen=params['max_seq_len'], split='train')
+    total_seqs = dp.get_num_sents(split='train')
     iter_per_epoch = total_seqs // params['batch_size']
     total_iters = iter_per_epoch * epochs
     best_loss = 1000000.
@@ -81,33 +85,23 @@ def main(params):
     val_score = 0. #eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
     val_rank = 1000
 
-    eval_function = eval_model if params['mode'] == 'generative' else eval_classify
+    eval_function = eval_translator if params['mode'] == 'generative' else eval_classify
+    leakage = 0. #params['leakage']
 
-    leakage = params['leakage']
+    print total_iters
     for i in xrange(total_iters):
         #TODO
-        if params['randomize_batches']:
-            batch, reset_next = dp.get_rand_doc_batch(params['batch_size'],split='train')
-            b_ids = [b['id'] for b in batch]
-            hidden = dp.get_hid_cache(b_ids, hidden)
-        else:
-            batch, reset_h = dp.get_doc_batch(split='train')
-            if len(reset_h) > 0:
-                hidden[0].data.index_fill_(1,torch.LongTensor(reset_h).cuda(),0.)
-                hidden[1].data.index_fill_(1,torch.LongTensor(reset_h).cuda(),0.)
-
-        inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, leakage=leakage)
-
+        batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'])
+        inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=params['max_seq_len'])
         # Reset the hidden states for which new docs have been sampled
 
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         hidden = repackage_hidden(hidden)
         optim.zero_grad()
-
         #TODO
         if params['mode'] == 'generative':
-            output, hidden = model.forward(inps, lens, hidden, auths)
+            output, _ = model.forward_mltrain(inps, lens, inps, lens, hidden_zeros)
             targets = pack_padded_sequence(Variable(targs).cuda(),lens)
             loss = criterion(pack_padded_sequence(output,lens)[0], targets[0])
         else:
@@ -126,17 +120,11 @@ def main(params):
         total_loss += loss.data.cpu().numpy()[0]
 
         # Save the hidden states in cache for later use
-        if params['randomize_batches']:
-            if len(reset_next) > 0:
-                hidden[0].data.index_fill_(1,torch.LongTensor(reset_next).cuda(),0.)
-                hidden[1].data.index_fill_(1,torch.LongTensor(reset_next).cuda(),0.)
-            dp.set_hid_cache(b_ids, hidden)
-
         if i % eval_every == 0 and i > 0:
-            val_rank, val_score = eval_function(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
+            val_rank, val_score = eval_function(dp, model, params, char_to_ix, auth_to_ix, split='val')
 
-        if i % iter_per_epoch == 0 and i > 0 and leakage > params['leakage_min']:
-            leakage = leakage * params['leakage_decay']
+        #if i % iter_per_epoch == 0 and i > 0 and leakage > params['leakage_min']:
+        #    leakage = leakage * params['leakage_decay']
 
         #if (i % iter_per_epoch == 0) and ((i//iter_per_epoch) >= params['lr_decay_st']):
         if i % params['log_interval'] == 0 and i > 0:
@@ -152,8 +140,8 @@ def main(params):
                 save_checkpoint({
                     'iter': i,
                     'arch': params,
-                    'val_mean_rank': val_rank,
-                    'val_auc': val_score,
+                    'val_loss': val_rank,
+                    'val_pplx': val_score,
                     'char_to_ix': char_to_ix,
                     'ix_to_char': ix_to_char,
                     'auth_to_ix': auth_to_ix,
@@ -171,6 +159,7 @@ if __name__ == "__main__":
   parser.add_argument('-d', '--dataset', dest='dataset', default='pan16AuthorMask', help='dataset: pan')
   # mode
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
+  parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
 
   parser.add_argument('--fappend', dest='fappend', type=str, default='baseline', help='append this string to checkpoint filenames')
@@ -193,14 +182,9 @@ if __name__ == "__main__":
   parser.add_argument('--use_sgd', dest='use_sgd', type=int, default=0, help='Use sgd')
   parser.add_argument('-m', '--max_epochs', dest='max_epochs', type=int, default=50, help='number of epochs to train for')
 
+  parser.add_argument('--drop_prob_emb', dest='drop_prob_emb', type=float, default=0.25, help='what dropout to apply right after the encoder to an RNN/LSTM')
   parser.add_argument('--drop_prob_encoder', dest='drop_prob_encoder', type=float, default=0.5, help='what dropout to apply right after the encoder to an RNN/LSTM')
   parser.add_argument('--drop_prob_decoder', dest='drop_prob_decoder', type=float, default=0.5, help='what dropout to apply right before the decoder in an RNN/LSTM')
-
-  # For regularization
-  parser.add_argument('--leakage', dest='leakage', type=float, default=0., help='Leakage rate initially')
-  parser.add_argument('--leakage_decay', dest='leakage_decay', type=float, default=0.95, help='Leakage decay rate')
-  parser.add_argument('--leakage_min', dest='leakage_min', type=float, default=1e-5, help='Minimum leakage rate')
-
 
   # Validation args
   parser.add_argument('--eval_interval', dest='eval_interval', type=float, default=0.5, help='print every x iters')
@@ -209,9 +193,12 @@ if __name__ == "__main__":
 
   # LSTM parameters
   parser.add_argument('--en_residual_conn', dest='en_residual_conn', type=int, default=0, help='depth of hidden layer in generator RNNs')
-  parser.add_argument('--hidden_depth', dest='hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')
+
   parser.add_argument('--embedding_size', dest='embedding_size', type=int, default=512, help='size of word encoding')
-  parser.add_argument('--hidden_size', dest='hidden_size', type=int, default=512, help='size of hidden layer in generator RNNs')
+  parser.add_argument('--enc_hidden_depth', dest='enc_hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')
+  parser.add_argument('--enc_hidden_size', dest='enc_hidden_size', type=int, default=512, help='size of hidden layer in generator RNNs')
+  parser.add_argument('--dec_hidden_depth', dest='dec_hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')
+  parser.add_argument('--dec_hidden_size', dest='dec_hidden_size', type=int, default=512, help='size of hidden layer in generator RNNs')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict

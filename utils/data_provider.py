@@ -85,6 +85,23 @@ class DataProvider():
                 batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author']})
                 yield batch, dead
 
+    def iter_sentences(self, split='train', batch_size=100, atoms='char'):
+        # Since this is a standalone interation usually run to completion
+        # we want to have a seperate temporary doc pointers here.
+        cur_char_idx = np.ones(len(self.data['docs']),dtype=np.int)
+        sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
+        batch = []
+
+        for i,cid in enumerate(self.splits[split]):
+            for j in xrange(self.get_num_sent_doc(cid, atoms=atoms)):
+                inp, targ = sent_func[atoms](cid, sidx=[j])
+                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'], 'id':cid})
+                if len(batch) == batch_size:
+                    yield batch
+                    batch = []
+        if batch:
+            yield batch
+
     def get_nextstring_doc(self, i, cur_char_idx, maxlen=-1):
         maxlen = self.max_seq_len if maxlen==-1 else maxlen
         cidx = cur_char_idx[i]
@@ -109,6 +126,15 @@ class DataProvider():
             total_batches = max(len(self.data['docs'][i]['text'])-1,0)//maxlen + 1 + total_batches
         return total_batches
 
+    def get_num_sents(self, split='train'):
+        total_batches = 0
+        for i in self.splits[split]:
+            total_batches = len(self.data['docs'][i]['tokens']) + total_batches
+        return total_batches
+
+    def get_num_sent_doc(self, cid, atoms = 'char'):
+        sents = [st for st in self.data['docs'][cid]['text'].split('.') if len(st)>0] if atoms == 'char' else self.data['docs'][cid]['tokens']
+        return len(sents)
 
     def get_doc_batch(self, split='train'):
         act_ids = np.where(self.cur_batch>=0)[0]
@@ -135,15 +161,55 @@ class DataProvider():
 
         return batch, dead_ids_next_it
 
-    def prepare_data(self, batch, char_to_ix, auth_to_ix, leakage = 0.):
+    def get_rand_sentence_tokenized(self, cid, sidx=None):
+        sents = self.data['docs'][cid]['tokens']
+
+        if len(sents) ==0:
+            import ipdb;ipdb.set_trace()
+
+        sidx = np.random.randint(0,len(sents),1) if sidx == None else sidx
+        s = sents[sidx[0]].split()
+
+        targ = s[1:]
+        inp = s[:-1]
+        return inp, targ
+
+    def get_rand_sentence(self, cid, sidx=None):
+        sents = [st for st in self.data['docs'][cid]['text'].split('.') if len(st)>0]
+
+        if len(sents) ==0:
+            import ipdb;ipdb.set_trace()
+
+        sidx = np.random.randint(0,len(sents),1) if sidx == None else sidx
+        s = sents[sidx[0]]
+
+        if s[0] == '2':
+            targ = s[1:]+'.'
+            inp = s
+        else:
+            targ = s + '.'
+            inp = '2'+s
+        return inp, targ
+
+    def get_sentence_batch(self, batch_size, split='train', atoms='char'):
+        batch_ids = np.random.choice(self.splits[split], batch_size, replace=False)
+        batch = []
+        sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
+        for i,cid in enumerate(batch_ids):
+            inp, targ = sent_func[atoms](cid)
+            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'],
+                'id':cid})
+        return batch
+
+    def prepare_data(self, batch, char_to_ix, auth_to_ix, leakage = 0., maxlen=None):
         inp_seqs = []
         targ_seqs = []
         lens = []
         auths = []
         b_sz = len(batch)
         for b in batch:
-            inp_seqs.append([char_to_ix[c] for c in b['in'] if c in char_to_ix])
-            targ_seqs.append([char_to_ix[c] for c in b['targ'] if c in char_to_ix])
+            inp_seqs.append([char_to_ix[c] for c in b['in'][:maxlen] if c in char_to_ix])
+            targ_seqs.append([char_to_ix[c] for c in b['targ'][:maxlen] if c in char_to_ix])
             lens.append(len(inp_seqs[-1]))
             # Sometimes either the targ or inp might lose a character (OOV)
             # Handle that situation here.
@@ -182,13 +248,27 @@ class DataProvider():
 
         return author_idx
 
-    def createVocab(self, threshold=5):
+    def createCharVocab(self, threshold=5):
         minivocab = {}
         ixtochar = {}
         vocab = Counter()
         for i in self.splits['train']:
             vocab.update([c for c in self.data['docs'][i]['text']])
 
+        #+1  so that 0 is used for padding
+        for i,c in enumerate(vocab):
+            if vocab[c] >= threshold:
+                minivocab[c] = len(minivocab) +1
+                ixtochar[minivocab[c]] = c
+        print 'Vocabulary size is %d'%(len(minivocab))
+        return minivocab, ixtochar
+
+    def createWordVocab(self, threshold=5):
+        minivocab = {}
+        ixtochar = {}
+        vocab = Counter()
+        for i in self.splits['train']:
+            vocab.update([w for tk in self.data['docs'][i]['tokens'] for w in tk.split()])
         #+1  so that 0 is used for padding
         for i,c in enumerate(vocab):
             if vocab[c] >= threshold:
