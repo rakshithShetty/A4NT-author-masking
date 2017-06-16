@@ -12,6 +12,7 @@ from sklearn.svm import SVC
 from sklearn.svm import LinearSVC
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
+from models.mlp_classifier import MLP_classifier
 
 def normalize(X, meanX=None, stdX = None):
     # X is assumed to be n_data x n_feats
@@ -24,7 +25,7 @@ def normalize(X, meanX=None, stdX = None):
 def count(dp, vocab, auth_to_ix, split='train'):
     # Now build feature vectors for all docs:
     docCounts= np.zeros((len(dp.splits[split]), len(vocab)),dtype=np.float32)
-    target = np.zeros((len(dp.splits[split])),dtype=np.float32)
+    target = np.zeros((len(dp.splits[split])),dtype=np.int)
 
     for i,idx in enumerate(dp.splits[split]):
         for w in dp.data['docs'][idx]['tokenized']:
@@ -89,10 +90,6 @@ def main(params):
     docCounts_val , target_val = count(dp, short_vocab, auth_to_ix, split='val')
     bow_features_val, _ = bow_features(docCounts_val, params['tfidf'], idf=idf_train)
 
-    # Normalize the data
-    bow_features_train, mean_tr, std_tr = normalize(bow_features_train)
-    bow_features_val , _, _ = normalize(bow_features_val , mean_tr, std_tr)
-
     # Do PCA?
     if params['pca'] >0:
         pca_model = PCA(n_components=params['pca'])
@@ -100,26 +97,32 @@ def main(params):
         print'Explained variance is %.2f'%(sum(pca_model.explained_variance_ratio_))
 
         bow_features_val = pca_model.transform(bow_features_val)
+        params['pca'] = bow_features_train.shape[-1]
 
-    if params['linearsvm']:
-        # Linear SVC alread implements one-vs-rest
-        svm_model = LinearSVC()#verbose=1)
-        svm_model.fit(bow_features_train, target_train)
+    # Normalize the data
+    bow_features_train, mean_tr, std_tr = normalize(bow_features_train)
+    bow_features_val , _, _ = normalize(bow_features_val , mean_tr, std_tr)
+
+
+    if params['mlp'] == False:
+        if params['linearsvm']:
+            # Linear SVC alread implements one-vs-rest
+            svm_model = LinearSVC()#verbose=1)
+            svm_model.fit(bow_features_train, target_train)
+
+        #Time to evaluate now.
+        confTr = svm_model.decision_function(bow_features_train)
+        confVal = svm_model.decision_function(bow_features_val)
     else:
-        svm_models = {}
-        # Now train one-vs-rest svm
-        for auths in auth_to_ix.keys()[:10]:
-            print 'training for author %s'%(auths)
-            c_aid = auth_to_ix[auths]
-            svm_models[auths] = SVC()
-            svm_models[auths].fit(bow_features_train, transform_labels(target_train, c_aid))
+        params['num_output_layers'] =len(auth_to_ix)
+        model = MLP_classifier(params)
+        model.fit(bow_features_train, target_train, bow_features_val, target_val, params['epochs'], params['lr'])
+        confTr = model.decision_function(bow_features_train)
+        confVal = model.decision_function(bow_features_val)
 
-    #Time to evaluate now.
-    confTr = svm_model.decision_function(bow_features_train)
     mean_rank_train = np.where(confTr.argsort(axis=1)[:,::-1] == target_train[:,None])[1].mean()
     train_accuracy = 100. * float((confTr.argmax(axis=1) == target_train).sum()) / len(target_train)
 
-    confVal = svm_model.decision_function(bow_features_val)
     mean_rank_val = np.where(confVal.argsort(axis=1)[:,::-1] == target_val[:,None])[1].mean()
     val_accuracy = 100. * float((confVal.argmax(axis=1) == target_val).sum()) / len(target_val)
 
@@ -136,7 +139,6 @@ def main(params):
     neg_auths_val = np.random.randint(0,n_auths,n_val)
     adjusted_scores_val = ((np.argsort(confVal[:, np.concatenate([target_val.astype(int), neg_auths_val])],axis=0)==np.concatenate([np.arange(n_val), np.arange(n_val)])).argmax(axis=0)+1)/float(n_val)
     auc_val = roc_auc_score(np.concatenate([np.ones(int(n_val),dtype=int), np.zeros(int(n_val),dtype=int)]), adjusted_scores_val)
-
 
     print '------------- Training set-------------------'
     print 'Accuracy is %.2f, Mean rank is %.2f / %d'%(train_accuracy, mean_rank_train, len(auth_to_ix))
@@ -165,6 +167,11 @@ if __name__ == "__main__":
   parser.add_argument( '--pca', dest='pca', type=int, default=-1, help='dataset: pan')
 
   parser.add_argument( '--linearsvm', dest='linearsvm', default=False, action='store_true', help='dataset: pan')
+
+  parser.add_argument( '--mlp', dest='mlp', default=False, action='store_true', help='use mlp as the learning model')
+  parser.add_argument( '--hidden_widths', dest='hidden_widths', nargs='+', type=int, default=[], help='hidden layer configuration')
+  parser.add_argument( '--lr', dest='lr', type=float, default=1e-3, help='learning rate')
+  parser.add_argument( '--epochs', dest='epochs', type=int, default=200, help='learning rate')
 
   # Vocab threshold
   parser.add_argument('--vocab_threshold', dest='vocab_threshold', type=int, default=5, help='vocab threshold')
