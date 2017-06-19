@@ -90,6 +90,9 @@ def main(params):
             batch, reset_next = dp.get_rand_doc_batch(params['batch_size'],split='train')
             b_ids = [b['id'] for b in batch]
             hidden = dp.get_hid_cache(b_ids, hidden)
+        elif params['use_sentences']:
+            batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'])
+            hidden = hidden_zeros
         else:
             batch, reset_h = dp.get_doc_batch(split='train')
             if len(reset_h) > 0:
@@ -172,6 +175,7 @@ if __name__ == "__main__":
   # mode
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
+  parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
 
   parser.add_argument('--fappend', dest='fappend', type=str, default='baseline', help='append this string to checkpoint filenames')
   parser.add_argument('-o', '--checkpoint_output_directory', dest='checkpoint_output_directory', type=str, default='cv/', help='output directory to write checkpoints to')
@@ -181,6 +185,7 @@ if __name__ == "__main__":
 
   parser.add_argument('-b', '--batch_size', dest='batch_size', type=int, default=10, help='max batch size')
   parser.add_argument('--randomize_batches', dest='randomize_batches', type=int, default=1, help='randomize batches')
+  parser.add_argument('--use_sentences', dest='use_sentences', type=int, default=0, help='randomize batches')
 
   # Optimization parameters
   parser.add_argument('-l', '--learning_rate', dest='learning_rate', type=float, default=1e-3, help='solver learning rate')
