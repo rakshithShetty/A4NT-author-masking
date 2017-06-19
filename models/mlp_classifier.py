@@ -21,8 +21,8 @@ class MLP_classifier(nn.Module):
         self.dropouts = nn.ModuleList()
         for i in xrange(len(self.hid_dims)):
             self.lin_layers.append(nn.Linear(prev_size, self.hid_dims[i]))
-            self.non_linearities.append(nn.ReLU())
-            self.dropouts.append(nn.Dropout(p=params.get('drop_prob',0.25)))
+            self.non_linearities.append(nn.SELU())
+            self.dropouts.append(nn.Dropout(p=params.get('drop_prob',0.0)))
             prev_size = self.hid_dims[i]
 
         self.softmax = nn.Softmax()
@@ -55,7 +55,7 @@ class MLP_classifier(nn.Module):
 
         return prob_out
 
-    def fit(self, features, targs, feat_val, targ_test, epochs, lr=1e-3):
+    def fit(self, features, targs, feat_val, targ_test, epochs, lr=1e-3, l2=0.01):
         n_samples = features.shape[0]
         features = features.astype(np.float32)
         b_sz = 10
@@ -65,7 +65,7 @@ class MLP_classifier(nn.Module):
         self.train()
         criterion = nn.CrossEntropyLoss()
         optim = torch.optim.RMSprop(self.parameters(), lr=lr, alpha=0.90,
-                                eps=1e-8,  weight_decay=0.01)
+                                eps=1e-8,  weight_decay=l2)
         idxes = np.arange(n_samples)
         total_loss = 0.
         #t = trange(total_iters, desc='ML')

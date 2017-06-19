@@ -116,7 +116,7 @@ def main(params):
     else:
         params['num_output_layers'] =len(auth_to_ix)
         model = MLP_classifier(params)
-        model.fit(bow_features_train, target_train, bow_features_val, target_val, params['epochs'], params['lr'])
+        model.fit(bow_features_train, target_train, bow_features_val, target_val, params['epochs'], params['lr'], params['l2'])
         confTr = model.decision_function(bow_features_train)
         confVal = model.decision_function(bow_features_val)
 
@@ -149,6 +149,7 @@ def main(params):
     print 'Accuracy is %.2f, Mean rank is %.2f / %d'%(val_accuracy, mean_rank_val, len(auth_to_ix))
     print 'Accuracy per adjusted scores %.3f'%(100.*((adjusted_scores_val[:n_val] >= 0.5).sum()+(adjusted_scores_val[n_val:] < 0.5).sum())/(2.*n_val))
     print 'AUC is  %.2f'%(auc_val)
+    import ipdb; ipdb.set_trace()
 
     print '--------------------------------------------------------------------------'
     print '--------------------------------------------------------------------------\n\n'
@@ -171,6 +172,7 @@ if __name__ == "__main__":
   parser.add_argument( '--mlp', dest='mlp', default=False, action='store_true', help='use mlp as the learning model')
   parser.add_argument( '--hidden_widths', dest='hidden_widths', nargs='+', type=int, default=[], help='hidden layer configuration')
   parser.add_argument( '--lr', dest='lr', type=float, default=1e-3, help='learning rate')
+  parser.add_argument( '--l2', dest='l2', type=float, default=1e-2, help='learning rate')
   parser.add_argument( '--epochs', dest='epochs', type=int, default=200, help='learning rate')
 
   # Vocab threshold
