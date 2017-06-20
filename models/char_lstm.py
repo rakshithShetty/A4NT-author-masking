@@ -80,7 +80,7 @@ class CharLstm(nn.Module):
         return (Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()),
                     Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()))
 
-    def _my_recurrent_layer(self, packed, h_prev):
+    def _my_recurrent_layer(self, packed, h_prev = None):
         if self.en_residual:
             p_out = packed
             hid_all = []
@@ -95,7 +95,10 @@ class CharLstm(nn.Module):
             hidden = (torch.cat([hid[0] for hid in hid_all],dim=-1), torch.cat([hid[1] for hid in hid_all],dim=-1))
             rnn_out = p_out
         else:
-            rnn_out, hidden = self.rec_layers(packed, h_prev)
+            if h_prev == None:
+                rnn_out, hidden = rec_func(packed)
+            else:
+                rnn_out, hidden = rec_func(packed, h_prev)
         return rnn_out, hidden
 
     def forward(self, x, lengths, h_prev, target_head, compute_softmax = False):
@@ -195,7 +198,7 @@ class CharLstm(nn.Module):
 
         return char_out
 
-    def forward_classify(self, x, h_prev, compute_softmax = False, predict_mode=False):
+    def forward_classify(self, x, h_prev=None, compute_softmax = False, predict_mode=False):
         # x should be a numpy array of n_seq x n_batch dimensions
         # In this case batch will be a single sequence.
         n_auth = self.num_output_layers
@@ -214,7 +217,7 @@ class CharLstm(nn.Module):
         rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
         # implement the multi-headed RNN.
         if self.max_pool_rnn:
-            rnn_out = self.dec_drop(torch.cat([torch.mean(rnn_out,dim=0,keepdim=False), rnn_out[-1]],
+            rnn_out = self.dec_drop(torch.cat([torch.mean(rnn_out,dim=0, keepdim=False), rnn_out[-1]],
                 dim=-1))
         else:
             rnn_out = self.dec_drop(rnn_out[-1])

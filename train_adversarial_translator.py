@@ -1,0 +1,216 @@
+import argparse
+import json
+import time
+import numpy as np
+import os
+from models.char_lstm import CharLstm
+from models.char_translator import CharTranslator
+from collections import defaultdict
+from utils.data_provider import DataProvider
+from utils.utils import repackage_hidden, eval_translator, eval_classify
+from torch.autograd import Variable
+
+import torch
+import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence
+import math
+
+
+def nll_loss(outputs, targets):
+    return torch.gather(outputs, 1, targets.view(-1,1))
+
+def save_checkpoint(state, fappend ='dummy', outdir = 'cv'):
+    filename = os.path.join(outdir,'checkpoint_translate_'+fappend+'_'+'%.2f'%(state['val_pplx'])+'.pth.tar')
+    torch.save(state, filename)
+
+def adv_forward_pass(modelGen, modelEval, inps, backprop_for='all')
+    gen_samples = modelGen.forward_gen(inps, lens, soft_samples=True)
+    if backprop_for == 'eval':
+        gen_samples = gen_samples.detach()
+    eval_out_gen, eval_hid = modelEval.forward_classify(gen_samples, compute_softmax=True)
+    eval_out_gt, eval_hid = modelEval.forward_classify(inps, compute_softmax=True)
+    return eval_out_gen, eval_out_gt
+
+def main(params):
+
+    dp = DataProvider(params)
+
+    # Create vocabulary and author index
+    if params['resume'] == None:
+        if params['atoms'] == 'char':
+            char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
+        else:
+            char_to_ix, ix_to_char = dp.createWordVocab(params['vocab_threshold'])
+        auth_to_ix = dp.createAuthorIdx()
+    else:
+        saved_model = torch.load(params['resume'])
+        char_to_ix = saved_model['char_to_ix']
+        auth_to_ix = saved_model['auth_to_ix']
+        ix_to_char = saved_model['ix_to_char']
+
+    params['vocabulary_size'] = len(char_to_ix)
+    params['num_output_layers'] = len(auth_to_ix)
+
+    modelGen = CharTranslator(params)
+    modelEval = CharTranslator(params)
+    # set to train mode, this activates dropout
+    modelGen.train()
+    modelEval.train()
+    #Initialize the RMSprop optimizer
+
+    optimGen = torch.optim.RMSprop(modelGen.parameters(),
+            lr=params['learning_rate_gen'], alpha=params['decay_rate'],
+            eps=params['smooth_eps'])
+    optimEval = torch.optim.RMSprop(modelGen.parameters(),
+            lr=params['learning_rate_eval'], alpha=params['decay_rate'],
+            eps=params['smooth_eps'])
+
+    mLcriterion = nn.CrossEntropyLoss()
+    eval_criterion = nn.NLLLoss()
+
+    # Restore saved checkpoint
+    if params['resume'] !=None:
+        modelGen.load_state_dict(saved_model['state_dict_gen'])
+        modelEval.load_state_dict(saved_model['state_dict_eval'])
+        optimGen.load_state_dict(saved_model['gen_optimizer'])
+        optimEval.load_state_dict(saved_model['eval_optimizer'])
+
+    total_loss_gen = 0.
+    total_loss_eval = 0.
+    start_time = time.time()
+    hiddenGen = modelGen.init_hidden(params['batch_size'])
+    hid_zeros_gen = modelGen.init_hidden(params['batch_size'])
+    hid_zeros_eval = modelEval.init_hidden(params['batch_size'])
+
+    # Compute the iteration parameters
+    epochs = params['max_epochs']
+    total_seqs = dp.get_num_sents(split='train')
+    iter_per_epoch = total_seqs // params['batch_size']
+    total_iters = iter_per_epoch * epochs
+    best_loss = 1000000.
+    best_val = 1000.
+    eval_every = int(iter_per_epoch * params['eval_interval'])
+
+    skip_first = 20
+    iters_eval= 5
+    iters_gen = 1
+
+    #val_score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
+    val_score = 0. #eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
+    val_rank = 1000
+
+    eval_function = eval_translator if params['mode'] == 'generative' else eval_classify
+    leakage = 0. #params['leakage']
+
+    print total_iters
+    for i in xrange(total_iters):
+        # Update the evaluator and get it into a good state.
+        it2=0
+        while it2==0 #eval_acc <= 60. or gen_acc >= 45. or it2<iters_eval*skip_first:
+            batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'])
+            inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=params['max_seq_len'])
+            eval_out_gen, eval_out_gt = adv_forward_pass(modelGen, modelEval, inps, backprop_for='eval')
+            targets = Variable(auths).cuda()
+            # Does this make any sense!!?
+            lossEval = eval_criterion(eval_out_gt, targets) + eval_criterion(eval_out_gen, targets)
+            optimEval.zero_grad()
+            lossEval.backward()
+            optimEval.step()
+            total_loss_eval += lossEval.data.cpu().numpy()[0]
+            it2 += 1
+
+        #TODO
+        batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'])
+        inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=params['max_seq_len'])
+        eval_out_gen, eval_out_gt = adv_forward_pass(modelGen, modelEval, inps, hid_zeros_gen, hid_zeros_eval)
+        targets = Variable(auths).cuda()
+        # Does this make any sense!!?
+        lossGen =  -eval_criterion(eval_out_gen, targets)
+        optimGen.zero_grad()
+        #TODO
+        lossGen.backward()
+        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+        torch.nn.utils.clip_grad_norm(modelGen.parameters(), params['grad_clip'])
+        # Take an optimization step
+        optim.step()
+
+        total_loss_gen += lossGen.data.cpu().numpy()[0]
+
+        if i % params['log_interval'] == 0 and i > 0:
+            cur_loss = total_loss_gen / params['log_interval']
+            elapsed = time.time() - start_time
+            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2e} | ms/batch {:5.2f} | '
+                    'loss {:5.2f} | ppl {:8.2f}'.format(
+                i//iter_per_epoch, i, total_iters, params['learning_rate'],
+                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
+            total_loss_gen = 0.
+            total_loss_eval = 0.
+
+            if val_rank <=best_val:
+                save_checkpoint({
+                    'iter': i,
+                    'arch': params,
+                    'val_loss': val_rank,
+                    'val_pplx': val_score,
+                    'char_to_ix': char_to_ix,
+                    'ix_to_char': ix_to_char,
+                    'auth_to_ix': auth_to_ix,
+                    'state_dict': modelGen.state_dict(),
+                    'loss':  cur_loss,
+                    'optimizer' : optim.state_dict(),
+                }, fappend = params['fappend'],
+                outdir = params['checkpoint_output_directory'])
+                best_val = val_rank
+            start_time = time.time()
+
+if __name__ == "__main__":
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument('-d', '--dataset', dest='dataset', default='pan16AuthorMask', help='dataset: pan')
+  # mode
+  parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
+  parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
+  parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
+
+  parser.add_argument('--fappend', dest='fappend', type=str, default='baseline', help='append this string to checkpoint filenames')
+  parser.add_argument('-o', '--checkpoint_output_directory', dest='checkpoint_output_directory', type=str, default='cv/', help='output directory to write checkpoints to')
+  parser.add_argument('--resume', dest='resume', type=str, default=None, help='append this string to checkpoint filenames')
+  parser.add_argument('--max_seq_len', dest='max_seq_len', type=int, default=50, help='maximum sequence length')
+  parser.add_argument('--vocab_threshold', dest='vocab_threshold', type=int, default=5, help='vocab threshold')
+
+  parser.add_argument('-b', '--batch_size', dest='batch_size', type=int, default=10, help='max batch size')
+  parser.add_argument('--randomize_batches', dest='randomize_batches', type=int, default=1, help='randomize batches')
+
+  # Optimization parameters
+  parser.add_argument('-l', '--learning_rate', dest='learning_rate', type=float, default=1e-3, help='solver learning rate')
+  parser.add_argument('--lr_decay', dest='lr_decay', type=float, default=0.95, help='solver learning rate')
+  parser.add_argument('--lr_decay_st', dest='lr_decay_st', type=int, default=0, help='solver learning rate')
+
+  parser.add_argument('--decay_rate', dest='decay_rate', type=float, default=0.99, help='decay rate for adadelta/rmsprop')
+  parser.add_argument('--smooth_eps', dest='smooth_eps', type=float, default=1e-8, help='epsilon smoothing for rmsprop/adagrad/adadelta')
+  parser.add_argument('--grad_clip', dest='grad_clip', type=float, default=5, help='clip gradients (normalized by batch size)? elementwise. if positive, at what threshold?')
+  parser.add_argument('--use_sgd', dest='use_sgd', type=int, default=0, help='Use sgd')
+  parser.add_argument('-m', '--max_epochs', dest='max_epochs', type=int, default=50, help='number of epochs to train for')
+
+  parser.add_argument('--drop_prob_emb', dest='drop_prob_emb', type=float, default=0.25, help='what dropout to apply right after the encoder to an RNN/LSTM')
+  parser.add_argument('--drop_prob_encoder', dest='drop_prob_encoder', type=float, default=0.5, help='what dropout to apply right after the encoder to an RNN/LSTM')
+  parser.add_argument('--drop_prob_decoder', dest='drop_prob_decoder', type=float, default=0.5, help='what dropout to apply right before the decoder in an RNN/LSTM')
+
+  # Validation args
+  parser.add_argument('--eval_interval', dest='eval_interval', type=float, default=0.5, help='print every x iters')
+  parser.add_argument('--num_eval', dest='num_eval', type=int, default=-1, help='print every x iters')
+  parser.add_argument('--log', dest='log_interval', type=int, default=1, help='print every x iters')
+
+  # LSTM parameters
+  parser.add_argument('--en_residual_conn', dest='en_residual_conn', type=int, default=0, help='depth of hidden layer in generator RNNs')
+
+  parser.add_argument('--embedding_size', dest='embedding_size', type=int, default=512, help='size of word encoding')
+  parser.add_argument('--enc_hidden_depth', dest='enc_hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')
+  parser.add_argument('--enc_hidden_size', dest='enc_hidden_size', type=int, default=512, help='size of hidden layer in generator RNNs')
+  parser.add_argument('--dec_hidden_depth', dest='dec_hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')
+  parser.add_argument('--dec_hidden_size', dest='dec_hidden_size', type=int, default=512, help='size of hidden layer in generator RNNs')
+
+  args = parser.parse_args()
+  params = vars(args) # convert to ordinary dict
+  print json.dumps(params, indent = 2)
+  main(params)

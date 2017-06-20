@@ -8,7 +8,27 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch import tensor
+import torch.nn.functional as FN
 
+def sample_gumbel(x):
+    noise = torch.rand(x.size()).cuda()
+    eps = 1e-20
+    noise.add_(eps).log_().neg_()
+    noise.add_(eps).log_().neg_()
+    return Variable(noise)
+
+def gumbel_softmax_sample(x, tau=0.2, hard=False):
+    noise = sample_gumbel(x)
+    y = (x + noise) / tau
+    y = FN.softmax(y)
+    if hard:
+        max_v, max_idx = y.max(dim=1,keepdim=True)
+        one_hot = Variable(y.data.new(y.size()).zero_().scatter_(1, max_idx.data, y.data.new(max_idx.size()).fill_(1.)) - y.data, requires_grad=False)
+        # Which is the right way to do this?
+        #y_out = one_hot.detach() + y
+        y_out = one_hot + y
+        return y_out.view_as(x)
+    return y.view_as(x)
 
 class CharTranslator(nn.Module):
     def __init__(self, params):
@@ -175,7 +195,7 @@ class CharTranslator(nn.Module):
 
         return prob_out, (enc_hidden, dec_hidden)
 
-    def forward_gen(self, x, h_prev, target_auth, n_max = 100, end_c = -1):
+    def forward_gen(self, x, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
         # atleast one character (eg. begin doc char), h_prev can be zeros. x is assumed to be
         # n_steps x 1 dimensional, i.e only one sample string generation at a time. Generation is
@@ -191,8 +211,7 @@ class CharTranslator(nn.Module):
         enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
 
         if self.max_pool_rnn:
-            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][0]],
-                dim=-1)
+            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][0]], dim=-1)
         else:
             ctxt = enc_hidden[0][0]
 
@@ -216,12 +235,18 @@ class CharTranslator(nn.Module):
         for i in xrange(n_max):
             # output is size seq * batch_size * vocab
             dec_out = p_rnn.mm(W) + b
-            max_sc, pred_c = dec_out.max(dim=-1)
-            char_out.append(pred_c)
+            if soft_samples:
+                samp = gumbel_softmax_sample(dec_out, temp, hard=True)
+                emb = samp.mm(self.char_emb.weight)
+                char_out.append(samp)
+            else:
+                max_sc, pred_c = dec_out.max(dim=-1)
+                char_out.append(pred_c)
+                emb = self.char_emb(pred_c)
+
             if (pred_c == end_c).data[0][0]:
                 break
             else:
-                emb = self.char_emb(pred_c)
                 # No need for any packing here
                 dec_inp = torch.cat([ctxt.view(1,1,-1), emb], dim=-1)
                 p_rnn, dec_hidden = self._my_recurrent_layer(dec_inp, dec_hidden, rec_func = self.dec_rec_layers, n_layers = self.dec_num_rec_layers)
