@@ -209,7 +209,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
         done = b_data[1]
         inps, targs, auths, lens = dp.prepare_data(b_data[0], char_to_ix, auth_to_ix)
         output, hidden = model.forward_classify(inps, hidden, compute_softmax=True,
-                predict_mode=True)
+                predict_mode=True, lens=lens)
         z = output.data.cpu().numpy()
         scores = z[0,:]
         correct_textblock = correct_textblock + (scores.argmax() == auths[0])

@@ -47,8 +47,10 @@ def main(params):
     if params['use_sgd']:
         optim = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], momentum = params['decay_rate'])
     else:
-        optim = torch.optim.RMSprop(model.parameters(), lr=params['learning_rate'], alpha=params['decay_rate'],
-                                eps=params['smooth_eps'])
+        optim = torch.optim.RMSprop([{'params': [p[1] for p in model.named_parameters() if p[0] != 'decoder_W']},
+                {'params':model.decoder_W, 'weight_decay':0.005}],
+                lr=params['learning_rate'], alpha=params['decay_rate'],
+                eps=params['smooth_eps'])
     # Loss function
     if params['mode'] == 'generative':
         criterion = nn.CrossEntropyLoss()
@@ -58,7 +60,7 @@ def main(params):
     # Restore saved checkpoint
     if params['resume'] !=None:
         model.load_state_dict(saved_model['state_dict'])
-        optim.load_state_dict(saved_model['optimizer'])
+        #optim.load_state_dict(saved_model['optimizer'])
 
     total_loss = 0.
     start_time = time.time()
@@ -115,7 +117,7 @@ def main(params):
             loss = criterion(pack_padded_sequence(output,lens)[0], targets[0])
         else:
             # for classifier auths is the target
-            output, hidden = model.forward_classify(inps, hidden, compute_softmax=True)
+            output, hidden = model.forward_classify(targs, hidden, compute_softmax=True, lens=lens)
             targets = Variable(auths).cuda()
             loss = criterion(output, targets)
         loss.backward()
@@ -149,9 +151,9 @@ def main(params):
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 i//iter_per_epoch, i, total_iters, params['learning_rate'],
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-            total_loss = 0.
-
-            if val_rank <=best_val:
+            
+            if cur_loss <=best_loss:
+                best_loss = cur_loss 
                 save_checkpoint({
                     'iter': i,
                     'arch': params,
@@ -167,6 +169,8 @@ def main(params):
                 outdir = params['checkpoint_output_directory'])
                 best_val = val_rank
             start_time = time.time()
+            total_loss = 0.
+
 
 if __name__ == "__main__":
 
