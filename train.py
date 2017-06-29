@@ -28,7 +28,10 @@ def main(params):
 
     # Create vocabulary and author index
     if params['resume'] == None:
-        char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
+        if params['atoms'] == 'char':
+            char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
+        else:
+            char_to_ix, ix_to_char = dp.createWordVocab(params['vocab_threshold'])
         auth_to_ix = dp.createAuthorIdx()
     else:
         saved_model = torch.load(params['resume'])
@@ -151,9 +154,9 @@ def main(params):
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 i//iter_per_epoch, i, total_iters, params['learning_rate'],
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-            
+
             if cur_loss <=best_loss:
-                best_loss = cur_loss 
+                best_loss = cur_loss
                 save_checkpoint({
                     'iter': i,
                     'arch': params,
