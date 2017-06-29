@@ -97,10 +97,14 @@ class DataProvider():
                 inp, targ = sent_func[atoms](cid, sidx=[j])
                 batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'], 'id':cid})
                 if len(batch) == batch_size:
-                    yield batch
+                    yield batch, j == (self.get_num_sent_doc(cid,atoms=atoms))
                     batch = []
+            if batch:
+                yield batch, True
+                batch = []
+
         if batch:
-            yield batch
+            yield batch, True
 
     def get_nextstring_doc(self, i, cur_char_idx, maxlen=-1):
         maxlen = self.max_seq_len if maxlen==-1 else maxlen
