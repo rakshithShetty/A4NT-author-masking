@@ -48,7 +48,7 @@ def main(params):
         optim = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], momentum = params['decay_rate'])
     else:
         optim = torch.optim.RMSprop([{'params': [p[1] for p in model.named_parameters() if p[0] != 'decoder_W']},
-                {'params':model.decoder_W, 'weight_decay':0.005}],
+                {'params':model.decoder_W, 'weight_decay':0.001}],
                 lr=params['learning_rate'], alpha=params['decay_rate'],
                 eps=params['smooth_eps'])
     # Loss function
@@ -176,6 +176,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument('-d', '--dataset', dest='dataset', default='pan16AuthorMask', help='dataset: pan')
+  parser.add_argument('--dataset_file', dest='dataset_file', default='dataset.json', help='dataset file')
   # mode
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')

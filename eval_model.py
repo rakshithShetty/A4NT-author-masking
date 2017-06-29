@@ -46,6 +46,7 @@ if __name__ == "__main__":
   parser.add_argument('--m_type', dest='m_type', type=str, default='generator', help='checkpoint filename')
   parser.add_argument('-s','--split', dest='split', type=str, default=None, help='which split to evaluate')
   parser.add_argument('--num_eval', dest='num_eval', type=int, default=-1, help='how many doc to evlauate')
+  parser.add_argument('--topk', dest='topk', type=int, default=5, help='how many doc to evlauate')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict

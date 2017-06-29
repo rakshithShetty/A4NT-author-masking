@@ -121,9 +121,11 @@ def main(params):
         confVal = model.decision_function(bow_features_val)
 
     mean_rank_train = np.where(confTr.argsort(axis=1)[:,::-1] == target_train[:,None])[1].mean()
+    topk_train = (np.where(confTr.argsort(axis=1)[:,::-1] == target_train[:,None])[1] <= params['topk']).sum() * 100. / len(target_train)
     train_accuracy = 100. * float((confTr.argmax(axis=1) == target_train).sum()) / len(target_train)
 
     mean_rank_val = np.where(confVal.argsort(axis=1)[:,::-1] == target_val[:,None])[1].mean()
+    topk_val = (np.where(confVal.argsort(axis=1)[:,::-1] == target_val[:,None])[1] <= params['topk']).sum() * 100. / len(target_val)
     val_accuracy = 100. * float((confVal.argmax(axis=1) == target_val).sum()) / len(target_val)
 
     # DO the binary evaluation similar to the Bagnall
@@ -142,14 +144,15 @@ def main(params):
 
     print '------------- Training set-------------------'
     print 'Accuracy is %.2f, Mean rank is %.2f / %d'%(train_accuracy, mean_rank_train, len(auth_to_ix))
+    print 'Top-%d Accuracy is %.2f'%(params['topk'], topk_train)
     print 'Accuracy per adjusted scores %.3f'%(100.*((adjusted_scores_tr[:n_train] >= 0.5).sum()+(adjusted_scores_tr[n_train:] < 0.5).sum())/(2.*n_train))
     print 'AUC is  %.2f'%(auc_tr)
 
     print '------------- Val set-------------------'
     print 'Accuracy is %.2f, Mean rank is %.2f / %d'%(val_accuracy, mean_rank_val, len(auth_to_ix))
+    print 'Top-%d Accuracy is %.2f'%(params['topk'], topk_val)
     print 'Accuracy per adjusted scores %.3f'%(100.*((adjusted_scores_val[:n_val] >= 0.5).sum()+(adjusted_scores_val[n_val:] < 0.5).sum())/(2.*n_val))
     print 'AUC is  %.2f'%(auc_val)
-    import ipdb; ipdb.set_trace()
 
     print '--------------------------------------------------------------------------'
     print '--------------------------------------------------------------------------\n\n'
@@ -174,6 +177,7 @@ if __name__ == "__main__":
   parser.add_argument( '--lr', dest='lr', type=float, default=1e-3, help='learning rate')
   parser.add_argument( '--l2', dest='l2', type=float, default=1e-2, help='learning rate')
   parser.add_argument( '--epochs', dest='epochs', type=int, default=200, help='learning rate')
+  parser.add_argument( '--topk', dest='topk', type=int, default=5, help='learning rate')
 
   # Vocab threshold
   parser.add_argument('--vocab_threshold', dest='vocab_threshold', type=int, default=5, help='vocab threshold')

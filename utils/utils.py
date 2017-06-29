@@ -193,6 +193,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
     #We go one document at a time and evaluate it using all the authors
     hidden = model.init_hidden(1)
     correct = 0.
+    correct_topk = 0.
     n_docs = 0.
     mean_corr_prob = 0.
     mean_max_prob = 0.
@@ -204,6 +205,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
     all_window_scores = defaultdict(list)
     all_auths = []
     correct_textblock = 0.
+    correct_textblock_topk = 0.
     n_blks = 0.
     for i, b_data in tqdm(enumerate(dp.iter_single_doc(split=split, max_docs=max_docs))):
         done = b_data[1]
@@ -213,6 +215,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
         z = output.data.cpu().numpy()
         scores = z[0,:]
         correct_textblock = correct_textblock + (scores.argmax() == auths[0])
+        correct_textblock_topk += (np.where(scores.argsort()[::-1]==auths[0])[0][0]<=params.get('topk',5)).sum()
         n_blks = n_blks+1.
         # Accumulate the scores for each doc.
         current_doc_score = current_doc_score + scores
@@ -224,6 +227,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
             hidden[1].data.index_fill_(1,torch.LongTensor([0]).cuda(),0.)
             correct = correct + (current_doc_score.argmax() == auths[0])
             mean_rank = mean_rank + np.where(current_doc_score.argsort()[::-1]==auths[0])[0][0]
+            correct_topk += (np.where(current_doc_score.argsort()[::-1]==auths[0])[0][0]<=params.get('topk',5)).sum()
             mean_corr_prob = mean_corr_prob + current_doc_score[auths[0]]
             mean_max_prob = mean_max_prob + current_doc_score.max()
             mean_min_prob = mean_min_prob + current_doc_score.min()
@@ -235,10 +239,13 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
 
     if dump_scores:
         pickle.dump({'scores':all_window_scores,'authors':all_auths}, open('window_scores_'+'dep2meanpool32p81_'+split+'.p','w'))
-
+    
+    topk = 5
     print 'Eval on %.1f docs of %s set is done'%(n_docs, split)
     print 'Doc level accuracy is %.3f., mean rank is %.2f '%(100. * (correct/n_docs), mean_rank/n_docs)
+    print 'Top-%d Accuracy is %.2f'%(params.get('topk',5), 100.*(correct_topk/n_docs))
     print 'Block level accuracy is %.3f.'%(100. * (correct_textblock/n_blks))
+    print 'Top-%d Block Accuracy is %.2f'%(params.get('topk',5), 100. *(correct_textblock_topk/n_blks))
     print 'Corr is %.2f | Max is %.2f | Min is %.2f'%(mean_corr_prob/n_docs, mean_max_prob/n_docs, mean_min_prob/n_docs)
     print '-----------------------------------'
 

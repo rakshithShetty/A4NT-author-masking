@@ -179,8 +179,8 @@ def main(params):
             lossEvalGt = eval_criterion(eval_out_gt, targets) 
             lossEvalFake = eval_criterion(eval_out_gen, targets)
             lossGeneric = eval_generic(generic_class_gt, ones) + eval_generic(generic_class_gen, zeros)
-            #lossEval = lossEvalGt + lossEvalFake + lossGeneric 
-            lossEval = lossGeneric 
+            lossEval = lossEvalGt + lossEvalFake + lossGeneric 
+            #lossEval = lossGeneric 
             optimEval.zero_grad()
             lossEval.backward()
             optimEval.step()

@@ -14,8 +14,8 @@ class DataProvider():
     def __init__(self,params):
         dataset = params['dataset']
         datadir = osp.join('data',dataset)
-        if osp.exists(osp.join(datadir,'dataset.json')):
-            self.data = json.load(open(osp.join(datadir,'dataset.json'),'r'))
+        if osp.exists(osp.join(datadir,params.get('dataset_file','dataset.json'))):
+            self.data = json.load(open(osp.join(datadir,params.get('dataset_file','dataset.json')),'r'))
         else:
             self.data = preproc_dataset(osp.join(datadir,'splits','train'), datadir)
 
