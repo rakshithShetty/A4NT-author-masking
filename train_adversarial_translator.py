@@ -15,6 +15,9 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 import math
 
+def wasserstien_loss(eval_out_gen, eval_out_gt, targets):
+    loss =0.
+    return loss
 
 def nll_loss(outputs, targets):
     return torch.gather(outputs, 1, targets.view(-1,1))
@@ -26,6 +29,7 @@ def save_checkpoint(state, fappend ='dummy', outdir = 'cv'):
 def disp_gen_samples(modelGen, dp, misc, maxlen=100, n_disp = 5, atoms='char'):
     modelGen.eval()
     ix_to_char = misc['ix_to_char']
+    jc = '' if atoms == 'char' else ' '
     batch = dp.get_sentence_batch(n_disp, split='train', atoms=atoms)
     inps, targs, auths, lens = dp.prepare_data(batch, misc['char_to_ix'], misc['auth_to_ix'], maxlen=maxlen)
     gen_samples, gen_lens, char_outs = modelGen.forward_advers_gen(inps, lens,
@@ -33,28 +37,34 @@ def disp_gen_samples(modelGen, dp, misc, maxlen=100, n_disp = 5, atoms='char'):
                     n_max=maxlen)
     print '----------------------Visualising Some Generated Samples-----------------------------------------\n'
     for i in xrange(len(lens)):
-        print '%d Seed text: %s'%(i, ''.join([ix_to_char[c] for c in inps.numpy()[:,i] if c in ix_to_char]))
-        print '%d Gen text: %s'%(i, ''.join([ix_to_char[c[i]] for c in char_outs[:lens[i]]]))
+        print '%d Inp : %s --> %s'%(i, misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c] for c in inps.numpy()[1:,i] if c in ix_to_char]))
+        print '%d Out : %s --> %s'%(i, misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c[i]] for c in char_outs[:gen_lens[i]]]))
     print '\n-------------------------------------------------------------------------------------------------'
     modelGen.train()
 
-def adv_forward_pass(modelGen, modelEval, inps, evalInps, lens, end_c=0, backprop_for='all', maxlen=100, printnow=False):
+def adv_forward_pass(modelGen, modelEval, inps, evalInps, lens, end_c=0, backprop_for='all', maxlen=100):
     gen_samples, gen_lens, char_outs = modelGen.forward_advers_gen(inps, lens, soft_samples=True, end_c=end_c, n_max=maxlen)
     if (gen_lens <=0).any():
         import ipdb; ipdb.set_trace()
-    gen_lensort_idx = gen_lens.argsort()[::-1]
+    len_sorted, gen_lensort_idx = gen_lens.sort(dim=0,descending=True)
     gen_samples = torch.cat([torch.unsqueeze(gs,0) for gs in gen_samples],dim=0)
-    gen_samples = gen_samples.index_select(1, Variable(torch.from_numpy(gen_lensort_idx.astype(int)),requires_grad=False).cuda())
+    gen_samples = gen_samples.index_select(1, Variable(gen_lensort_idx,requires_grad=False))
     if backprop_for == 'eval':
         gen_samples = gen_samples.detach()
-    #Now pass the generated samples to the evaluator
-    eval_out_gen, _, generic_class_gen = modelEval.forward_classify(gen_samples, adv_inp=True, lens=gen_lens[gen_lensort_idx].tolist())
+    #---------------------------------------------------
+    # Now pass the generated samples to the evaluator
+    # output has format: [auth_classifier out, hidden state, generic classifier out (optional])
+    #---------------------------------------------------
+    eval_out_gen = modelEval.forward_classify(gen_samples, adv_inp=True, lens=len_sorted.tolist())
+
     #Pass GT samples to evaluator
     if backprop_for == 'eval':
-        eval_out_gt, _, generic_class_gt = modelEval.forward_classify(evalInps, lens=lens)
+        #output has format: [auth_classifier out, hidden state, generic classifier out (optional)]
+        eval_out_gt = modelEval.forward_classify(evalInps, lens=lens)
     else:
-        eval_out_gt = []; generic_class_gt = []
-    return eval_out_gen, eval_out_gt, generic_class_gen, generic_class_gt
+        eval_out_gt = ()
+
+    return eval_out_gen[0:1] + eval_out_gt[0:1]+ eval_out_gen[2:] + eval_out_gt[2:]
 
 def main(params):
     dp = DataProvider(params)
@@ -66,25 +76,27 @@ def main(params):
             char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
         else:
             char_to_ix, ix_to_char = dp.createWordVocab(params['vocab_threshold'])
-        auth_to_ix = dp.createAuthorIdx()
-        misc['char_to_ix'] = char_to_ix; misc['ix_to_char'] = ix_to_char; misc['auth_to_ix'] = auth_to_ix
+        auth_to_ix, ix_to_author = dp.createAuthorIdx()
+        misc['char_to_ix'] = char_to_ix; misc['ix_to_char'] = ix_to_char; misc['auth_to_ix'] = auth_to_ix; misc['ix_to_auth'] = ix_to_auth
         restore_optim = False
         restore_gen = False
         restore_eval = False
     else:
         saved_model = torch.load(params['resume']) if params['loadgen'] == None else torch.load(params['loadgen'])
         model_gen_state = saved_model['state_dict_gen'] if params['loadgen'] == None else saved_model['state_dict']
-        restore_gen = True 
+        restore_gen = True
         if params['loadeval'] or params['resume']:
             saved_eval_model = torch.load(params['loadeval']) if params['loadeval'] else saved_model
             model_eval_state = saved_eval_model['state_dict_eval'] if params['loadeval'] == None else saved_eval_model['state_dict']
             eval_params = saved_eval_model['arch']
             restore_eval = True
+            assert(not any([saved_eval_model['ix_to_char'][k] != saved_model['ix_to_char'][k] for k in saved_eval_model['ix_to_char']]))
+
         else:
             restore_eval = False
             eval_params = params
         if params['resume'] and not (params['loadgen'] or params['loadeval']):
-            restore_optim = True 
+            restore_optim = True
         else:
             restore_optim = False
 
@@ -92,11 +104,14 @@ def main(params):
         auth_to_ix = saved_model['auth_to_ix']
         ix_to_char = saved_model['ix_to_char']
         misc['char_to_ix'] = char_to_ix; misc['ix_to_char'] = ix_to_char; misc['auth_to_ix'] = auth_to_ix
+        if 'ix_to_auth' not in saved_model:
+            misc['ix_to_auth'] = {auth_to_ix[a]:a for a in auth_to_ix}
+        else:
+            misc['ix_to_auth'] = saved_model['ix_to_auth']
 
     params['vocabulary_size'] = len(misc['char_to_ix'])
     params['num_output_layers'] = len(misc['auth_to_ix'])
-    params['generic_classifier'] = True
-    eval_params['generic_classifier'] = True
+    eval_params['generic_classifier'] = params['generic_classifier']
 
     modelGen = CharTranslator(params)
     modelEval = CharLstm(eval_params)
@@ -117,7 +132,7 @@ def main(params):
     eval_generic = nn.BCELoss()
 
     # Restore saved checkpoint
-    if restore_gen: 
+    if restore_gen:
         state = modelGen.state_dict()
         state.update(model_gen_state)
         modelGen.load_state_dict(state)
@@ -145,8 +160,8 @@ def main(params):
     best_val = 1000.
     eval_every = int(iter_per_epoch * params['eval_interval'])
 
-    skip_first = 20
-    iters_eval= 5
+    skip_first = 1#20
+    iters_eval= 1
     iters_gen = 1
 
     #val_score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
@@ -171,41 +186,47 @@ def main(params):
                             atoms=params['atoms'])
             inps, targs, auths, lens = dp.prepare_data(batch, misc['char_to_ix'],
                             misc['auth_to_ix'], maxlen=params['max_seq_len'])
-            eval_out_gen, eval_out_gt, generic_class_gen, generic_class_gt =  adv_forward_pass(modelGen, 
-                            modelEval, inps, targs, lens, end_c=misc['char_to_ix']['.'], backprop_for='eval',
-                            maxlen=params['max_seq_len'])
+            # outs are organized as
+            outs =  adv_forward_pass(modelGen, modelEval, inps, targs, lens,
+                        end_c=misc['char_to_ix']['.'], backprop_for='eval',
+                        maxlen=params['max_seq_len'])
             targets = Variable(auths).cuda()
             # Does this make any sense!!?
-            lossEvalGt = eval_criterion(eval_out_gt, targets) 
-            lossEvalFake = eval_criterion(eval_out_gen, targets)
-            lossGeneric = eval_generic(generic_class_gt, ones) + eval_generic(generic_class_gen, zeros)
-            lossEval = lossEvalGt + lossEvalFake + lossGeneric 
-            #lossEval = lossGeneric 
+            lossEvalGt = eval_criterion(outs[1], targets)
+            lossEvalFake = eval_criterion(outs[0], targets)
+            lossEval = lossEvalGt + lossEvalFake
+            if params['generic_classifier']:
+                lossGeneric = eval_generic(outs[3], ones) + eval_generic(outs[2], zeros)
+                lossEval += lossGeneric
+                avgL_generic += lossGeneric.data.cpu().numpy()[0]
+            #lossEval = lossGeneric
             optimEval.zero_grad()
             lossEval.backward()
             optimEval.step()
             avgL_gt += lossEvalGt.data.cpu().numpy()[0]
             avgL_fake += lossEvalFake.data.cpu().numpy()[0]
-            avgL_generic += lossGeneric.data.cpu().numpy()[0]
             avgL_eval += lossEval.data.cpu().numpy()[0]
             it2 += 1
             #print '%.2f'%lossEval.data[0],
         #===========================================================================
 
         #--------------------------------------------------------------------------
-        # Training the Generator 
+        # Training the Generator
         #--------------------------------------------------------------------------
         batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'])
         inps, targs, auths, lens = dp.prepare_data(batch, misc['char_to_ix'], misc['auth_to_ix'],
                         maxlen=params['max_seq_len'])
-        eval_out_gen, eval_out_gt, generic_class_gen, generic_class_gt = adv_forward_pass(modelGen, 
+        outs = adv_forward_pass(modelGen,
                         modelEval, inps, targs, lens, end_c=misc['char_to_ix']['.'], maxlen=params['max_seq_len'])
         targets = Variable(auths).cuda()
         # Does this make any sense!!?
         optimGen.zero_grad()
-        lossGenericGenerator = eval_generic(generic_class_gen, ones)
-        #lossGen = -eval_criterion(eval_out_gen, targets) + 10*lossGenericGenerator
-        lossGen = 1*lossGenericGenerator
+
+        lossGen = -eval_criterion(outs[0], targets) + eval_criterion(outs[0], ((-1*targets)+1))
+        if params['generic_classifier']:
+            lossGenericGenerator = eval_generic(outs[2], ones)
+            lossGen += 10*lossGenericGenerator
+        #lossGen = 1*lossGenericGenerator
         #TODO
         lossGen.backward()
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -216,7 +237,7 @@ def main(params):
         #===========================================================================
 
         # Visualize some generator samples once in a while
-        if i%30 ==29:
+        if i%100 ==99:
             disp_gen_samples(modelGen, dp, misc, maxlen=params['max_seq_len'], atoms=params['atoms'])
         skip_first = 1
 
@@ -244,7 +265,7 @@ def main(params):
                     'arch': params,
                     'val_loss': val_rank,
                     'val_pplx': val_score,
-                    'misc': misc, 
+                    'misc': misc,
                     'state_dict': modelGen.state_dict(),
                     'loss':  lossGen,
                     'optimizerGen' : optimGen.state_dict(),
@@ -300,7 +321,7 @@ if __name__ == "__main__":
   parser.add_argument('--en_residual_conn', dest='en_residual_conn', type=int, default=0, help='depth of hidden layer in generator RNNs')
 
   parser.add_argument('--embedding_size', dest='embedding_size', type=int, default=512, help='size of word encoding')
-  # Generator's parameters 
+  # Generator's parameters
   parser.add_argument('--enc_hidden_depth', dest='enc_hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')
   parser.add_argument('--enc_hidden_size', dest='enc_hidden_size', type=int, default=512, help='size of hidden layer in generator RNNs')
   parser.add_argument('--dec_hidden_depth', dest='dec_hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')
@@ -309,6 +330,7 @@ if __name__ == "__main__":
   # Discriminator's parameters
   parser.add_argument('--hidden_depth', dest='hidden_depth', type=int, default=1, help='depth of hidden layer in evaluator RNNs')
   parser.add_argument('--hidden_size', dest='hidden_size', type=int, default=512, help='size of hidden layer in eva;iatpr RNNs')
+  parser.add_argument('--generic_classifier', dest='generic_classifier', default=False, action='store_true', help='Should we use a generic classifier to classify fake vs real text')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict

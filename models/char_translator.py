@@ -190,7 +190,7 @@ class CharTranslator(nn.Module):
             prob_out = score_out.view(n_steps_targ, b_sz, self.vocab_size)
 
         return prob_out, (enc_hidden, dec_hidden)
-    
+
     def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
         # atleast one character (eg. begin doc char), h_prev can be zeros. x is assumed to be
@@ -209,7 +209,7 @@ class CharTranslator(nn.Module):
 
         # Encode the sequence of input characters
         enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
-        
+
         if self.max_pool_rnn:
             ctxt = torch.cat([packed_mean(enc_rnn_out, dim=0), enc_hidden[0][0]],
                 dim=-1)
@@ -232,8 +232,8 @@ class CharTranslator(nn.Module):
         p_rnn = dec_rnn_out.view(b_sz,-1)
         char_out = []
         samp_out = []
-        gen_lens = np.zeros(b_sz, dtype=np.int)
-        prev_done = np.zeros(b_sz, dtype=np.bool)
+        gen_lens = torch.cuda.IntTensor(b_sz).zero_()
+        prev_done = torch.cuda.ByteTensor(b_sz).zero_()
 
         for i in xrange(n_max):
             # output is size seq * batch_size * vocab
@@ -249,8 +249,8 @@ class CharTranslator(nn.Module):
                 char_out.append(pred_c)
                 emb = self.char_emb(Variable(pred_c))
 
-            gen_lens += (~prev_done)
-            prev_done +=(pred_c.cpu().numpy() == end_c)
+            gen_lens += (prev_done==0).int()
+            prev_done +=(pred_c == end_c)
             if prev_done.all():
                 break
             else:
@@ -261,7 +261,7 @@ class CharTranslator(nn.Module):
 
         return samp_out, gen_lens, char_out
 
-    def forward_gen(self, x, h_prev=None, authors =None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1):
+    def forward_gen(self, x, h_prev=None, authors=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
         # atleast one character (eg. begin doc char), h_prev can be zeros. x is assumed to be
         # n_steps x 1 dimensional, i.e only one sample string generation at a time. Generation is
@@ -314,7 +314,7 @@ class CharTranslator(nn.Module):
                 char_out.append(pred_c)
                 emb = self.char_emb(pred_c)
 
-            if (pred_c == end_c).data[0]:
+            if (pred_c == end_c).data[0][0]:
                 break
             else:
                 # No need for any packing here
@@ -323,4 +323,4 @@ class CharTranslator(nn.Module):
                 p_rnn = p_rnn[-1]
 
         return char_out
-    
+

@@ -48,7 +48,7 @@ def main(params):
         print '--------------------------------------------'
         print 'Author: %s'%(batch[0]['author'])
         print 'Seed text: %s'%(jc.join([c for c in batch[0]['in'] if c in char_to_ix]))
-        print 'Gen text: %s'%(jc.join([ix_to_char[c.data.cpu().tolist()[0]] for c in char_outs]))
+        print 'Gen text: %s'%(jc.join([ix_to_char[c.data.cpu()[0][0]] for c in char_outs]))
 
 
 

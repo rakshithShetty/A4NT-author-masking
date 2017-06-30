@@ -223,7 +223,7 @@ class DataProvider():
                 else:
                     inp_seqs[-1].insert(0,0)
                     lens[-1] = lens[-1] + 1
-            authidx = auth_to_ix[b['author']] if np.random.rand() > leakage else np.random.choice(auth_to_ix.values())
+            authidx = auth_to_ix[b['author']] if np.random.rand() >= leakage else np.random.choice(auth_to_ix.values())
             auths.append(authidx)
 
         # pad the sequences
@@ -250,7 +250,8 @@ class DataProvider():
                 author_idx[self.data['docs'][i]['author']] = n_authors
                 n_authors = n_authors + 1
 
-        return author_idx
+        ix_to_author = {author_idx[a]:a for a in author_idx}
+        return author_idx, ix_to_author
 
     def createCharVocab(self, threshold=5):
         minivocab = {}
