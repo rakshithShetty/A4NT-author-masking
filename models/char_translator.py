@@ -44,8 +44,11 @@ class CharTranslator(nn.Module):
         self.enc_hidden_size = params.get('enc_hidden_size',-1)
         self.dec_hidden_size = params.get('dec_hidden_size',-1)
         self.en_residual = params.get('en_residual_conn',1)
+        self.pad_auth_vec = params.get('pad_auth_vec',0)
 
         # Initialize the model layers
+        if self.pad_auth_vec:
+            self.auth_emb = nn.Embedding(params.get('num_output_layers',2), self.pad_auth_vec)
         # Embedding layer
         self.char_emb = nn.Embedding(self.vocab_size, self.emb_size, padding_idx=0)
         self.emb_drop = nn.Dropout(p=params.get('drop_prob_emb',0.25))
@@ -68,9 +71,9 @@ class CharTranslator(nn.Module):
 
         # Decoder Lstm Layers
         if self.en_residual:
-            self.dec_rec_layers = nn.ModuleList([nn.LSTM((self.enc_hidden_size*(1+self.max_pool_rnn)+self.emb_size), self.dec_hidden_size, 1) for i in xrange(self.dec_num_rec_layers)])
+            self.dec_rec_layers = nn.ModuleList([nn.LSTM((self.enc_hidden_size*(1+self.max_pool_rnn)+self.emb_size + self.pad_auth_vec), self.dec_hidden_size, 1) for i in xrange(self.dec_num_rec_layers)])
         else:
-            self.dec_rec_layers = nn.LSTM(self.enc_hidden_size*(1+self.max_pool_rnn)+ self.emb_size, self.dec_hidden_size, self.dec_num_rec_layers)
+            self.dec_rec_layers = nn.LSTM(self.enc_hidden_size*(1+self.max_pool_rnn)+ self.emb_size+self.pad_auth_vec, self.dec_hidden_size, self.dec_num_rec_layers)
 
         # Output decoder layer
         self.decoder_W = nn.Parameter(torch.zeros([self.dec_hidden_size,
@@ -138,7 +141,7 @@ class CharTranslator(nn.Module):
                 rnn_out, hidden = rec_func(packed, h_prev)
         return rnn_out, hidden
 
-    def forward_mltrain(self, inp, lengths_inp, targ, lengths_targ, h_prev, compute_softmax = False):
+    def forward_mltrain(self, inp, lengths_inp, targ, lengths_targ, h_prev, compute_softmax = False, auths=None):
         # x should be a numpy array of n_seq x n_batch dimensions
         b_sz = inp.size(1)
         n_steps = inp.size(0)
@@ -159,6 +162,9 @@ class CharTranslator(nn.Module):
                 dim=-1)
         else:
             ctxt = enc_hidden[0][0]
+
+        if self.pad_auth_vec:
+            ctxt = torch.cat([ctxt,self.auth_emb(Variable(auths).cuda())], dim=-1)
 
         # Setup target variable now
         targ = Variable(targ).cuda()
@@ -191,7 +197,7 @@ class CharTranslator(nn.Module):
 
         return prob_out, (enc_hidden, dec_hidden)
 
-    def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1):
+    def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
         # atleast one character (eg. begin doc char), h_prev can be zeros. x is assumed to be
         # n_steps x 1 dimensional, i.e only one sample string generation at a time. Generation is
@@ -215,6 +221,10 @@ class CharTranslator(nn.Module):
                 dim=-1)
         else:
             ctxt = enc_hidden[0][0]
+
+        #Append with target author embedding
+        if self.pad_auth_vec:
+            ctxt = torch.cat([ctxt,self.auth_emb(Variable(auths).cuda())], dim=-1)
 
         targ_init = x[0]
         targ_emb = self.char_emb(targ_init)
@@ -284,6 +294,9 @@ class CharTranslator(nn.Module):
             ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][0]], dim=-1)
         else:
             ctxt = enc_hidden[0][0]
+        #Append with target author embedding
+        if self.pad_auth_vec:
+            ctxt = torch.cat([ctxt,self.auth_emb(Variable(authors).cuda())], dim=-1)
 
         targ_init = x[0]
         targ_emb = self.char_emb(targ_init)

@@ -184,7 +184,7 @@ def eval_translator(dp, model, params, char_to_ix, auth_to_ix, split='val', max_
         if len(b_data[0]) < b_sz:
             hidden_zero =  model.init_hidden(len(b_data[0]))
         inps, targs, auths, lens = dp.prepare_data(b_data[0], char_to_ix, auth_to_ix, maxlen=params['max_seq_len'])
-        output, hidden = model.forward_mltrain(inps, lens, inps, lens, hidden_zero, compute_softmax=False)
+        output, hidden = model.forward_mltrain(inps, lens, inps, lens, hidden_zero, compute_softmax=False, auths=auths)
         targets = pack_padded_sequence(Variable(targs).cuda(),lens)
         loss = criterion(pack_padded_sequence(output,lens)[0], targets[0])
         total_loss += loss.data.cpu().numpy()[0]

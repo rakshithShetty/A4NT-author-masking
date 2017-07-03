@@ -33,7 +33,7 @@ def main(params):
             char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
         else:
             char_to_ix, ix_to_char = dp.createWordVocab(params['vocab_threshold'])
-        auth_to_ix = dp.createAuthorIdx()
+        auth_to_ix, ix_to_author = dp.createAuthorIdx()
     else:
         saved_model = torch.load(params['resume'])
         char_to_ix = saved_model['char_to_ix']
@@ -101,7 +101,7 @@ def main(params):
         optim.zero_grad()
         #TODO
         if params['mode'] == 'generative':
-            output, _ = model.forward_mltrain(inps, lens, inps, lens, hidden_zeros)
+            output, _ = model.forward_mltrain(inps, lens, inps, lens, hidden_zeros, auths=auths)
             targets = pack_padded_sequence(Variable(targs).cuda(),lens)
             loss = criterion(pack_padded_sequence(output,lens)[0], targets[0])
         else:
@@ -161,6 +161,7 @@ if __name__ == "__main__":
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
+  parser.add_argument('--pad_auth_vec', dest='pad_auth_vec', type=int, default=10, help='maximum sequence length')
 
   parser.add_argument('--fappend', dest='fappend', type=str, default='baseline', help='append this string to checkpoint filenames')
   parser.add_argument('-o', '--checkpoint_output_directory', dest='checkpoint_output_directory', type=str, default='cv/', help='output directory to write checkpoints to')
