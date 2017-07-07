@@ -12,7 +12,7 @@ import torch.nn.functional as FN
 import numpy as np
 
 def sample_gumbel(x):
-    noise = torch.rand(x.size()).cuda()
+    noise = torch.cuda.FloatTensor(x.size()).uniform_()
     eps = 1e-20
     noise.add_(eps).log_().neg_()
     noise.add_(eps).log_().neg_()
@@ -197,7 +197,7 @@ class CharTranslator(nn.Module):
 
         return prob_out, (enc_hidden, dec_hidden)
 
-    def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None):
+    def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None, adv_inp=False):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
         # atleast one character (eg. begin doc char), h_prev can be zeros. x is assumed to be
         # n_steps x 1 dimensional, i.e only one sample string generation at a time. Generation is
@@ -205,12 +205,15 @@ class CharTranslator(nn.Module):
 
         n_steps = x.size(0)
         b_sz = x.size(1)
-        if self.training:
-            x = Variable(x).cuda()
-        else:
-            x = Variable(x,volatile=True).cuda()
+        if not adv_inp:
+            if self.training:
+                x = Variable(x).cuda()
+            else:
+                x = Variable(x,volatile=True).cuda()
 
-        emb = self.emb_drop(self.char_emb(x))
+            emb = self.emb_drop(self.char_emb(x))
+        else:
+            emb = self.emb_drop(x.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1))
         packed = pack_padded_sequence(emb, lengths_inp)
 
         # Encode the sequence of input characters
@@ -226,8 +229,11 @@ class CharTranslator(nn.Module):
         if self.pad_auth_vec:
             ctxt = torch.cat([ctxt,self.auth_emb(Variable(auths).cuda())], dim=-1)
 
-        targ_init = x[0]
-        targ_emb = self.char_emb(targ_init)
+        if not adv_inp:
+            targ_init = x[0]
+            targ_emb = self.char_emb(targ_init)
+        else:
+            targ_emb = x[0,:,:].mm(self.char_emb.weight)
 
         dec_inp = torch.cat([ctxt, targ_emb], dim=-1)
         # Decode the output sequence using encoder state
@@ -253,6 +259,7 @@ class CharTranslator(nn.Module):
                 emb = samp.mm(self.char_emb.weight)
                 _, pred_c = samp.data.max(dim=-1)
                 char_out.append(pred_c)
+                samp.data.masked_fill_(prev_done.view(-1,1), 0.)
                 samp_out.append(samp)
             else:
                 max_sc, pred_c = dec_out.data.max(dim=-1)

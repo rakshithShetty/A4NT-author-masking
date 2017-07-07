@@ -195,8 +195,11 @@ class DataProvider():
             inp = '2'+s
         return inp, targ
 
-    def get_sentence_batch(self, batch_size, split='train', atoms='char'):
-        batch_ids = np.random.choice(self.splits[split], batch_size, replace=False)
+    def get_sentence_batch(self, batch_size, split='train', atoms='char', aid=None):
+        if aid == None:
+            batch_ids = np.random.choice(self.splits[split], batch_size, replace=False)
+        else:
+            batch_ids = np.random.choice([idx for idx in self.splits[split] if self.data['docs'][idx]['author'] == aid], batch_size, replace=False)
         batch = []
         sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
         for i,cid in enumerate(batch_ids):
