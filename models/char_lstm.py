@@ -213,12 +213,12 @@ class CharLstm(nn.Module):
                 x = Variable(x,volatile=True).cuda()
             else:
                 x = Variable(x).cuda()
-       
+
             emb = self.enc_drop(self.encoder(x))
         else:
-            emb = x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1)
+            emb = self.enc_drop(x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1))
 
-        # Pack the sentences as they can be of different lens 
+        # Pack the sentences as they can be of different lens
         packed = pack_padded_sequence(emb, lens)
 
         rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
