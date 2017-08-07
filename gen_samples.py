@@ -18,9 +18,15 @@ def main(params):
 
     # Create vocabulary and author index
     saved_model = torch.load(params['model'])
-    char_to_ix = saved_model['char_to_ix']
-    auth_to_ix = saved_model['auth_to_ix']
-    ix_to_char = saved_model['ix_to_char']
+    if 'misc' in saved_model:
+        misc = saved_model['misc']
+        char_to_ix = misc['char_to_ix']
+        auth_to_ix = misc['auth_to_ix']
+        ix_to_char = misc['ix_to_char']
+    else:
+        char_to_ix = saved_model['char_to_ix']
+        auth_to_ix = saved_model['auth_to_ix']
+        ix_to_char = saved_model['ix_to_char']
     cp_params = saved_model['arch']
 
     dp = DataProvider(cp_params)
@@ -44,11 +50,12 @@ def main(params):
             batch = dp.get_sentence_batch(1,split=params['split'], atoms=cp_params.get('atoms','char'))
 
         inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix)
-        char_outs = model.forward_gen(inps, hidden, auths, n_max = params['max_len'],end_c=char_to_ix['.'])
+        auths_inp = 1 - auths if params['flip'] else auths
+        char_outs = model.forward_gen(inps, hidden, auths_inp, n_max = params['max_len'],end_c=char_to_ix['.'])
         print '--------------------------------------------'
         print 'Author: %s'%(batch[0]['author'])
         print 'Seed text: %s'%(jc.join([c for c in batch[0]['in'] if c in char_to_ix]))
-        print 'Gen text: %s'%(jc.join([ix_to_char[c.data.cpu()[0][0]] for c in char_outs]))
+        print 'Gen text: %s'%(jc.join([ix_to_char[c.data.cpu()[0]] for c in char_outs]))
 
 
 
@@ -62,6 +69,7 @@ if __name__ == "__main__":
   parser.add_argument('--seed_length', dest='seed_length', type=int, default=100, help='character length of seed to the generator')
   parser.add_argument('-i', '--interactive', dest='interactive', action='store_true', help='Should it be interactive ')
   parser.add_argument('--m_type', dest='m_type', type=str, default='generative', help='type')
+  parser.add_argument('--flip', dest='flip', type=int, default=0, help='flip authors')
 
 
   args = parser.parse_args()

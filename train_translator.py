@@ -33,11 +33,12 @@ def main(params):
             char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
         else:
             char_to_ix, ix_to_char = dp.createWordVocab(params['vocab_threshold'])
-        auth_to_ix, ix_to_author = dp.createAuthorIdx()
+        auth_to_ix, ix_to_auth = dp.createAuthorIdx()
     else:
         saved_model = torch.load(params['resume'])
         char_to_ix = saved_model['char_to_ix']
         auth_to_ix = saved_model['auth_to_ix']
+        ix_to_auth = saved_model['ix_to_auth']
         ix_to_char = saved_model['ix_to_char']
 
     params['vocabulary_size'] = len(char_to_ix)
@@ -91,7 +92,12 @@ def main(params):
     print total_iters
     for i in xrange(total_iters):
         #TODO
-        batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'])
+        if params['split_generators']:
+            c_aid = ix_to_auth[np.random.choice(auth_to_ix.values())]
+        else:
+            c_aid = None
+
+        batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'], aid=c_aid)
         inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=params['max_seq_len'])
         # Reset the hidden states for which new docs have been sampled
 
@@ -145,6 +151,7 @@ def main(params):
                     'char_to_ix': char_to_ix,
                     'ix_to_char': ix_to_char,
                     'auth_to_ix': auth_to_ix,
+                    'ix_to_auth': ix_to_auth,
                     'state_dict': model.state_dict(),
                     'loss':  cur_loss,
                     'optimizer' : optim.state_dict(),
@@ -184,16 +191,21 @@ if __name__ == "__main__":
   parser.add_argument('-m', '--max_epochs', dest='max_epochs', type=int, default=50, help='number of epochs to train for')
 
   parser.add_argument('--drop_prob_emb', dest='drop_prob_emb', type=float, default=0.25, help='what dropout to apply right after the encoder to an RNN/LSTM')
-  parser.add_argument('--drop_prob_encoder', dest='drop_prob_encoder', type=float, default=0.5, help='what dropout to apply right after the encoder to an RNN/LSTM')
-  parser.add_argument('--drop_prob_decoder', dest='drop_prob_decoder', type=float, default=0.5, help='what dropout to apply right before the decoder in an RNN/LSTM')
+  parser.add_argument('--drop_prob_encoder', dest='drop_prob_encoder', type=float, default=0.25, help='what dropout to apply right after the encoder to an RNN/LSTM')
+  parser.add_argument('--drop_prob_decoder', dest='drop_prob_decoder', type=float, default=0.25, help='what dropout to apply right before the decoder in an RNN/LSTM')
 
   # Validation args
   parser.add_argument('--eval_interval', dest='eval_interval', type=float, default=0.5, help='print every x iters')
   parser.add_argument('--num_eval', dest='num_eval', type=int, default=-1, help='print every x iters')
   parser.add_argument('--log', dest='log_interval', type=int, default=1, help='print every x iters')
 
+  # Add noise instead of dropout after encoder
+  parser.add_argument('--apply_noise', dest='apply_noise', type=int, default=None)
+
   # LSTM parameters
   parser.add_argument('--en_residual_conn', dest='en_residual_conn', type=int, default=0, help='depth of hidden layer in generator RNNs')
+  parser.add_argument('--split_generators', dest='split_generators',
+                        type=int, default=0, help='Split the generators')
 
   parser.add_argument('--embedding_size', dest='embedding_size', type=int, default=512, help='size of word encoding')
   parser.add_argument('--enc_hidden_depth', dest='enc_hidden_depth', type=int, default=1, help='depth of hidden layer in generator RNNs')

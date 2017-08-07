@@ -55,10 +55,7 @@ def main(params):
                 lr=params['learning_rate'], alpha=params['decay_rate'],
                 eps=params['smooth_eps'])
     # Loss function
-    if params['mode'] == 'generative':
-        criterion = nn.CrossEntropyLoss()
-    else:
-        criterion = nn.NLLLoss()
+    criterion = nn.CrossEntropyLoss()
 
     # Restore saved checkpoint
     if params['resume'] !=None:
@@ -120,7 +117,7 @@ def main(params):
             loss = criterion(pack_padded_sequence(output,lens)[0], targets[0])
         else:
             # for classifier auths is the target
-            output, hidden = model.forward_classify(targs, hidden, compute_softmax=True, lens=lens)
+            output, hidden = model.forward_classify(targs, hidden, compute_softmax=False, lens=lens)
             targets = Variable(auths).cuda()
             loss = criterion(output, targets)
         loss.backward()

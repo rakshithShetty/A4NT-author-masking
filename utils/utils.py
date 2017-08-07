@@ -169,6 +169,7 @@ def eval_translator(dp, model, params, char_to_ix, auth_to_ix, split='val', max_
         dump_scores=False):
     #We go one document at a time and evaluate it using all the authors
     b_sz = 100
+    c_sz = b_sz
     hidden_zero = model.init_hidden(b_sz)
     correct = 0.
     n_docs = 0.
@@ -181,8 +182,9 @@ def eval_translator(dp, model, params, char_to_ix, auth_to_ix, split='val', max_
     model.eval()
 
     for i, b_data in tqdm(enumerate(dp.iter_sentences(split=split, atoms=params.get('atoms','char'), batch_size = b_sz))):
-        if len(b_data[0]) < b_sz:
+        if len(b_data[0]) != b_sz or len(b_data[0]) != c_sz:
             hidden_zero =  model.init_hidden(len(b_data[0]))
+            c_sz = len(b_data[0])
         inps, targs, auths, lens = dp.prepare_data(b_data[0], char_to_ix, auth_to_ix, maxlen=params['max_seq_len'])
         output, hidden = model.forward_mltrain(inps, lens, inps, lens, hidden_zero, compute_softmax=False, auths=auths)
         targets = pack_padded_sequence(Variable(targs).cuda(),lens)
