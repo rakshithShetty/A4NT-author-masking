@@ -249,8 +249,8 @@ def main(params):
     # Do size averaging here so that classes are balanced
     bceLogitloss = nn.BCEWithLogitsLoss(size_average=True)
     eval_generic = nn.BCELoss(size_average=True)
-    cycle_loss_func = nn.L1Loss() if params['cycle_loss_type'] == 'bow' else nn.MSELoss()
-    featmatch_l2_loss = nn.MSELoss()
+    cycle_loss_func = nn.L1Loss() if params['cycle_loss_type'] == 'bow' else nn.L1Loss()
+    featmatch_l2_loss = nn.L1Loss()
     ml_criterion = nn.CrossEntropyLoss()
     accuracy_lay = nn.L1Loss()
 
@@ -612,6 +612,7 @@ def main(params):
                 save_checkpoint({
                     'iter': i,
                     'arch': params,
+                    'eval_arch': eval_params,
                     'val_loss': val_rank,
                     'val_pplx': val_score,
                     'misc': misc,
@@ -633,6 +634,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--dataset', dest='dataset',
                         default='pan16AuthorMask', help='dataset: pan')
+    parser.add_argument('--datasetfile', dest='dataset_file', default='dataset.json', help='dataset: pan')
     # mode
     parser.add_argument('--mode', dest='mode', type=str,
                         default='generative', help='print every x iters')
@@ -753,6 +755,8 @@ if __name__ == "__main__":
     # Gumbel softmax parameters
     parser.add_argument('--gumbel_temp',
                         dest='gumbel_temp', type=float, default=0.5)
+    parser.add_argument('--softmax_scale',
+                        dest='softmax_scale', type=float, default=3.0)
     parser.add_argument('--gumbel_hard',
                         dest='gumbel_type', type=bool, default=True)
 

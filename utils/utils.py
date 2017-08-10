@@ -163,7 +163,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
     else:
         auc = 0.
 
-    return (mean_rank/n_docs), auc
+    return (correct_textblock/n_blks),auc
 
 def eval_translator(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs=-1,
         dump_scores=False):

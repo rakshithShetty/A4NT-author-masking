@@ -164,6 +164,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument('-d', '--dataset', dest='dataset', default='pan16AuthorMask', help='dataset: pan')
+  parser.add_argument('--datasetfile', dest='dataset_file', default='dataset.json', help='dataset: pan')
   # mode
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')

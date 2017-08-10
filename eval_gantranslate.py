@@ -79,6 +79,7 @@ def main(params):
 
     accum_diff_eval = [[],[]]
     accum_err_eval = np.zeros(len(auth_to_ix))
+    accum_err_real = np.zeros(len(auth_to_ix))
     accum_count_gen = np.zeros(len(auth_to_ix))
 
 
@@ -100,6 +101,7 @@ def main(params):
 
         gen_aid_out = outs[0][:, auths_inp[0]]
         accum_err_eval[auths_inp[0]] += (gen_aid_out.data >= 0.5).float().mean()
+        accum_err_real[auths_inp[0]] += (real_aid_out.data >= 0.5).float().mean()
         accum_count_gen[auths_inp[0]] += 1.
         accum_diff_eval[auths_inp[0]].append(gen_aid_out.data[0] - real_aid_out.data[0])
         if params['print']:
@@ -111,7 +113,9 @@ def main(params):
         #    print '%d/%d\r'%(i, params['num_samples']),
 
     err_a1, err_a2 = accum_err_eval[0]/(1e-5+accum_count_gen[0]), accum_err_eval[1]/(1e-5+accum_count_gen[1])
+    err_real_a1, err_real_a2 = accum_err_real[0]/(1e-5+accum_count_gen[0]), accum_err_real[1]/(1e-5+accum_count_gen[1])
     print(' erra1 {:3.2f} - erra2 {:3.2f}'.format(100.*err_a1, 100.*err_a2))
+    print(' err_real_a1 {:3.2f} - err_real_a2 {:3.2f}'.format(100.*err_real_a1, 100.*err_real_a2))
     print(' count %d - %d'%(accum_count_gen[0], accum_count_gen[1]))
 
     diff_arr0, diff_arr1 =  np.array(accum_diff_eval[0]), np.array(accum_diff_eval[1])

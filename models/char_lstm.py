@@ -52,7 +52,7 @@ class CharLstm(nn.Module):
         #                             xrange(self.num_output_layers)])
         self.dec_drop = nn.Dropout(p=params.get('drop_prob_decoder',0.25))
 
-        self.softmax = nn.LogSoftmax()
+        self.softmax = nn.Softmax()
 
         self.init_weights()
         # we should move it out so that whether to do cuda or not should be upto the user.

@@ -37,6 +37,7 @@ class CharTranslator(nn.Module):
         super(CharTranslator, self).__init__()
         #+1 is to allow padding index
         self.encoder_only = encoder_only
+        self.encoder_mean_vec = params.get('encoder_mean_vec', 0)
         self.vocab_size = params.get('vocabulary_size',-1) + 1
 
         self.enc_num_rec_layers = params.get('enc_hidden_depth',-1)
@@ -51,6 +52,7 @@ class CharTranslator(nn.Module):
         self.pad_auth_vec = params.get('pad_auth_vec',0)
 
         self.gumb_type = params.get('gumbel_hard', False)
+        self.softmax_scale = params.get('softmax_scale', 2.0)
         self.split_gen = params.get('split_generators', 0)
 
         # Initialize the model layers
@@ -270,6 +272,12 @@ class CharTranslator(nn.Module):
         h_prev_enc = h_prev if h_prev !=None or b_sz != self.zero_hidden_bsz else self.zero_hidden
         # Encode the sequence of input characters
         enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev=h_prev_enc, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
+
+        if self.encoder_mean_vec:
+            ctxt = torch.cat([packed_mean(enc_rnn_out, dim=0), enc_hidden[0][0]],
+                dim=-1)
+        else:
+            ctxt = enc_hidden[0][0]
         return enc_hidden[0][0]
 
     def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None, adv_inp=False):
@@ -335,7 +343,7 @@ class CharTranslator(nn.Module):
             # output is size seq * batch_size * vocab
             dec_out = p_rnn.mm(W) + b
             if  soft_samples:
-                samp = gumbel_softmax_sample(dec_out*2.0, temp, hard=self.gumb_type)
+                samp = gumbel_softmax_sample(dec_out*self.softmax_scale, temp, hard=self.gumb_type)
                 emb = samp.mm(self.char_emb.weight)
                 _, pred_c = samp.data.max(dim=-1)
                 char_out.append(pred_c)

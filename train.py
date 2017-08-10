@@ -32,7 +32,7 @@ def main(params):
             char_to_ix, ix_to_char = dp.createCharVocab(params['vocab_threshold'])
         else:
             char_to_ix, ix_to_char = dp.createWordVocab(params['vocab_threshold'])
-        auth_to_ix = dp.createAuthorIdx()
+        auth_to_ix, ix_to_auth = dp.createAuthorIdx()
     else:
         saved_model = torch.load(params['resume'])
         char_to_ix = saved_model['char_to_ix']
@@ -75,13 +75,13 @@ def main(params):
     total_seqs = dp.get_num_seqs(maxlen=params['max_seq_len'], split='train')
     iter_per_epoch = total_seqs // params['batch_size']
     total_iters = iter_per_epoch * epochs
-    best_loss = 1000000.
+    best_loss = 0.
     best_val = 1000.
     eval_every = int(iter_per_epoch * params['eval_interval'])
 
     #val_score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
     val_score = 0. #eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
-    val_rank = 1000
+    val_rank = 0
 
     eval_function = eval_model if params['mode'] == 'generative' else eval_classify
 
@@ -152,8 +152,8 @@ def main(params):
                 i//iter_per_epoch, i, total_iters, params['learning_rate'],
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
 
-            if cur_loss <=best_loss:
-                best_loss = cur_loss
+            if val_rank >=best_loss:
+                best_loss = val_rank
                 save_checkpoint({
                     'iter': i,
                     'arch': params,
@@ -176,7 +176,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument('-d', '--dataset', dest='dataset', default='pan16AuthorMask', help='dataset: pan')
-  parser.add_argument('--dataset_file', dest='dataset_file', default='dataset.json', help='dataset file')
+  parser.add_argument('--datasetfile', dest='dataset_file', default='dataset.json', help='dataset file')
   # mode
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
