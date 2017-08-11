@@ -48,10 +48,11 @@ def main(params):
     jc = '' if cp_params.get('atoms','char') == 'char' else ' '
 
     for i in xrange(params['num_samples']):
+        c_aid = np.random.choice(auth_to_ix.values())
         if params['m_type'] == 'generative':
             batch = dp.get_random_string(slen = params['seed_length'], split=params['split'])
         else:
-            batch = dp.get_sentence_batch(1,split=params['split'], atoms=cp_params.get('atoms','char'))
+            batch = dp.get_sentence_batch(1,split=params['split'], atoms=cp_params.get('atoms','char'), aid=misc['ix_to_auth'][c_aid])
 
         inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix)
         auths_inp = 1 - auths if params['flip'] else auths

@@ -82,28 +82,38 @@ def save_checkpoint(state, fappend='dummy', outdir='cv'):
     torch.save(state, filename)
 
 
-def disp_gen_samples(modelGen, dp, misc, maxlen=100, n_disp=5, atoms='char'):
+def disp_gen_samples(modelGen, modelEval, dp, misc, maxlen=100, n_disp=5, atoms='char', append_tensor=None):
     modelGen.eval()
+    modelEval.eval()
     ix_to_char = misc['ix_to_char']
     jc = '' if atoms == 'char' else ' '
     c_aid = np.random.choice(misc['auth_to_ix'].values())
     batch = dp.get_sentence_batch(n_disp, split='train', atoms=atoms, aid=misc['ix_to_auth'][c_aid])
     inps, targs, auths, lens = dp.prepare_data(
         batch, misc['char_to_ix'], misc['auth_to_ix'], maxlen=maxlen)
-    gen_samples, gen_lens, char_outs = modelGen.forward_advers_gen(inps, lens,
-                                                                   soft_samples=True, end_c=misc['char_to_ix']['.'],
-                                                                   n_max=maxlen, auths=1 - auths)
+
+    outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix']['.'], backprop_for='None',
+                    maxlen=maxlen, auths=auths, cycle_compute=True,
+                    append_symb=append_tensor, temp=params['gumbel_temp'], GradFilterLayer = None)
+
+    #gen_samples, gen_lens, char_outs = modelGen.forward_advers_gen(inps, lens,
+    #                                                               soft_samples=True, end_c=misc['char_to_ix']['.'],
+    #                                                               n_max=maxlen, auths=1 - auths)
+    gen_lens, char_outs, rev_lens, rev_char_outs = outs[-5], outs[-4], outs[-2], outs[-1]
     print '----------------------Visualising Some Generated Samples-----------------------------------------\n'
     for i in xrange(len(lens)):
         print '%d Inp : %s --> %s' % (i, misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c] for c in inps.numpy()[1:, i] if c in ix_to_char]))
         print '  Out : %s --> %s' % (misc['ix_to_auth'][1-auths[i]], jc.join([ix_to_char[c[i]] for c in char_outs[:gen_lens[i]]]))
+        #print '%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
+        print '  Rev : %s --> %s\n' % (misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c[i]] for c in rev_char_outs[:rev_lens[i]]]))
     print '\n-------------------------------------------------------------------------------------------------'
     modelGen.train()
+    modelEval.train()
 
 
 def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all', maxlen=100, auths=None,
                      cycle_compute=False, append_symb=None, temp=0.5, GradFilterLayer=None):
-    if backprop_for == 'eval':
+    if backprop_for == 'eval' or backprop_for=='None':
         modelGen.eval()
     else:
         modelGen.train()
@@ -154,8 +164,8 @@ def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all
         rev_gen_samples_orig_order = rev_gen_samples.index_select(1, rev_sort_idx)
         rev_gen_samples_orig_order = GradFilter(2)(rev_gen_samples_orig_order) if GradFilterLayer else rev_gen_samples_orig_order
         rev_gen_lens = rev_gen_lens.index_select(0, rev_sort_idx.data)
-
-        samples_out = (gen_samples_orig_order, gen_lens, rev_gen_samples_orig_order, rev_gen_lens, rev_char_outs)
+        rev_char_outs = [rc.index_select(0,rev_sort_idx.data) for rc in rev_char_outs]
+        samples_out = (gen_samples_orig_order, gen_lens, char_outs, rev_gen_samples_orig_order, rev_gen_lens, rev_char_outs)
     else:
         samples_out = (gen_samples, gen_lens)
 
@@ -312,9 +322,19 @@ def main(params):
 
     eval_function = eval_translator if params['mode'] == 'generative' else eval_classify
     leakage = 0.  # params['leakage']
+    append_tensor = np.zeros((1, params['batch_size'], params['vocabulary_size'] + 1), dtype=np.float32)
+    append_tensor[:, :, misc['char_to_ix']['2']] = 1
+    append_tensor = Variable(torch.FloatTensor(
+        append_tensor), requires_grad=False).cuda()
+    # Another for the displaying cycle reconstruction
+    append_tensor_disp = np.zeros((1, 5, params['vocabulary_size'] + 1), dtype=np.float32)
+    append_tensor_disp[:, :, misc['char_to_ix']['2']] = 1
+    append_tensor_disp = Variable(torch.FloatTensor(
+        append_tensor_disp), requires_grad=False).cuda()
 
-    disp_gen_samples(modelGen, dp, misc,
-                     maxlen=params['max_seq_len'], atoms=params['atoms'])
+
+    disp_gen_samples(modelGen, modelEval, dp, misc,
+                     maxlen=params['max_seq_len'], atoms=params['atoms'], append_tensor=append_tensor_disp)
     ones = Variable(torch.ones(params['batch_size'])).cuda()
     zeros = Variable(torch.zeros(params['batch_size'])).cuda()
     one = torch.FloatTensor([1]).cuda()
@@ -333,12 +353,6 @@ def main(params):
             print 'No previous experiment of same name found'
         gen_log = cc.create_experiment(our_exp_name)
         disc_log = cc.create_experiment("discriminator" + params['fappend'])
-
-    append_tensor = np.zeros(
-        (1, params['batch_size'], params['vocabulary_size'] + 1), dtype=np.float32)
-    append_tensor[:, :, misc['char_to_ix']['2']] = 1
-    append_tensor = Variable(torch.FloatTensor(
-        append_tensor), requires_grad=False).cuda()
 
     #pr = cProfile.Profile()
     #pr.enable()
@@ -484,6 +498,7 @@ def main(params):
 
             eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
 
+            #import ipdb; ipdb.set_trace()
             feature_match_loss = params['feature_matching'] * featmatch_l2_loss(outs[1][0][0].mean(dim=0),
                     eval_out_gt[1][0][0].mean(dim=0).detach())
 
@@ -563,8 +578,9 @@ def main(params):
 
         # Visualize some generator samples once in a while
         if i % 100 == 99:
-            disp_gen_samples(
-                modelGen, dp, misc, maxlen=params['max_seq_len'], atoms=params['atoms'])
+            disp_gen_samples( modelGen, modelEval, dp, misc,
+                    maxlen=params['max_seq_len'], atoms=params['atoms'],
+                    append_tensor=append_tensor_disp)
         skip_first = 1
         # Monitor the Error more frequently
         if i % 10 == 9:
