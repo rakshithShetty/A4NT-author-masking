@@ -113,7 +113,7 @@ def disp_gen_samples(modelGen, modelEval, dp, misc, maxlen=100, n_disp=5, atoms=
 
 
 def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all', maxlen=100, auths=None,
-                     cycle_compute=False, append_symb=None, temp=0.5, GradFilterLayer=None):
+                     cycle_compute=False, cycle_limit_backward=False, append_symb=None, temp=0.5, GradFilterLayer=None):
     if backprop_for == 'eval' or backprop_for=='None':
         modelGen.eval()
     else:
@@ -154,12 +154,18 @@ def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all
     if cycle_compute and backprop_for != 'eval':
         reverse_inp = torch.cat([append_symb, gen_samples_srt])
         #reverse_inp = reverse_inp.detach()
+        if cycle_limit_backward:
+            for p in modelGen.parameters():
+                p.requires_grad = False
         rev_gen_samples, rev_gen_lens, rev_char_outs = modelGen.forward_advers_gen(reverse_inp, len_sorted.tolist(),
                                                                                    soft_samples=True, end_c=end_c,
                                                                                    n_max=maxlen, temp=temp, auths=auths, adv_inp=True)
         rev_gen_samples = torch.cat(
             [torch.unsqueeze(gs, 0) for gs in rev_gen_samples], dim=0)
 
+        if cycle_limit_backward:
+            for p in modelGen.parameters():
+                p.requires_grad = True
         # Undo the lensorting done on top
         gen_samples_orig_order = gen_samples_srt.index_select(1, rev_sort_idx)
         rev_gen_samples_orig_order = rev_gen_samples.index_select(1, rev_sort_idx)
@@ -494,7 +500,8 @@ def main(params):
                     maxlen=params['max_seq_len'])
         outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix']['.'],
                     maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
-                    append_symb=append_tensor, temp=params['gumbel_temp'], GradFilterLayer = GradFilterLayer)
+                    cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
+                    GradFilterLayer = GradFilterLayer)
         #---------------------------------------------------------------------
         # Get a batch of other author samples. This is for feature mathcing loss
         #---------------------------------------------------------------------
@@ -770,6 +777,8 @@ if __name__ == "__main__":
                         dest='cycle_loss_type', type=str, default=None)
     parser.add_argument('--cycle_loss_w',
                         dest='cycle_loss_w', type=float, default=0.)
+    parser.add_argument('--cycle_loss_limitback',
+                        dest='cycle_loss_limitback', type=bool, default=False)
     # apply gradient filtering
     parser.add_argument('--gradient_filter',
                         dest='gradient_filter', type=int, default=None)
