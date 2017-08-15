@@ -17,6 +17,7 @@ import math
 from pycrayon import CrayonClient
 import time
 import cProfile, pstats, io
+#from graphvisualize import make_dot
 
 class GradFilter(Function):
     def __init__(self, topk=1):
@@ -195,35 +196,42 @@ def main(params):
     else:
         saved_model = torch.load(
             params['resume']) if params['loadgen'] == None else torch.load(params['loadgen'])
-        model_gen_state = saved_model['state_dict_gen'] if params['loadgen'] == None else saved_model['state_dict']
+        model_gen_state = saved_model['state_dict']
         restore_gen = True
         if params['loadeval'] or params['resume']:
             saved_eval_model = torch.load(
                 params['loadeval']) if params['loadeval'] else saved_model
             model_eval_state = saved_eval_model['state_dict_eval'] if params[
                 'loadeval'] == None else saved_eval_model['state_dict']
-            eval_params = saved_eval_model['arch']
+            eval_params = saved_eval_model['eval_arch']
             restore_eval = True
-            assert(not any([saved_eval_model['ix_to_char'][k] != saved_model['ix_to_char'][k]
-                            for k in saved_eval_model['ix_to_char']]))
+            #assert(not any([saved_eval_model['ix_to_char'][k] != saved_model['ix_to_char'][k]
+            #                for k in saved_eval_model['ix_to_char']]))
         else:
             restore_eval = False
             eval_params = params
         if params['resume'] and not (params['loadgen'] or params['loadeval']):
-            restore_optim = True
+            restore_optim = False
         else:
             restore_optim = False
 
-        char_to_ix = saved_model['char_to_ix']
-        auth_to_ix = saved_model['auth_to_ix']
-        ix_to_char = saved_model['ix_to_char']
-        misc['char_to_ix'] = char_to_ix
-        misc['ix_to_char'] = ix_to_char
-        misc['auth_to_ix'] = auth_to_ix
-        if 'ix_to_auth' not in saved_model:
-            misc['ix_to_auth'] = {auth_to_ix[a]: a for a in auth_to_ix}
+        if 'misc' not in saved_model:
+            char_to_ix = saved_model['char_to_ix']
+            auth_to_ix = saved_model['auth_to_ix']
+            ix_to_char = saved_model['ix_to_char']
+            misc['char_to_ix'] = char_to_ix
+            misc['ix_to_char'] = ix_to_char
+            misc['auth_to_ix'] = auth_to_ix
+            if 'ix_to_auth' not in saved_model:
+                misc['ix_to_auth'] = {auth_to_ix[a]: a for a in auth_to_ix}
+            else:
+                misc['ix_to_auth'] = saved_model['ix_to_auth']
         else:
-            misc['ix_to_auth'] = saved_model['ix_to_auth']
+            misc = saved_model['misc']
+            char_to_ix = misc['char_to_ix']
+            auth_to_ix = misc['auth_to_ix']
+            ix_to_char = misc['ix_to_char']
+
 
     params['vocabulary_size'] = len(misc['char_to_ix'])
     params['num_output_layers'] = len(misc['auth_to_ix'])
@@ -560,6 +568,10 @@ def main(params):
         accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean() + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
         accum_count_gen[targ_aid] += 1.
         lossGenTot = mlLoss + lossGen + cyc_loss + feature_match_loss
+        #lossGenTot = cyc_loss#mlLoss + lossGen + cyc_loss + feature_match_loss
+        #g = make_dot(lossGenTot,{n:p for n,p in modelGen.named_parameters()})
+        #import ipdb; ipdb.set_trace()
+
 
         #if params['generic_classifier']:
         #    lossGenericGenerator = eval_generic(outs[1], ones)
