@@ -240,7 +240,7 @@ class DataProvider():
     def get_sentence_batch(self, batch_size, split='train', atoms='char', aid=None, sample_by_len = False):
         allids = self.lenMap[self.getRandLen()] if sample_by_len else self.splits[split]
         if aid:
-            allids = [idx for idx in allids if self.data['docs'][idx][self.athstr] == aid]
+            allids = [idx for idx in allids if self.data['docs'][idx[0] if sample_by_len else idx][self.athstr] == aid]
 
         batch_ids = [allids[i] for i in np.random.randint(0, len(allids), batch_size)]
         batch = []
