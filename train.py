@@ -148,9 +148,9 @@ def main(params):
         if i % params['log_interval'] == 0 and i > 0:
             cur_loss = total_loss / params['log_interval']
             elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2e} | ms/batch {:5.2f} | '
+            print('| epoch {:3.2f} | {:5d}/{:5d} batches | lr {:02.2e} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
-                i//iter_per_epoch, i, total_iters, params['learning_rate'],
+                float(i)/iter_per_epoch, i, total_iters, params['learning_rate'],
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
 
             if val_rank >=best_loss:
