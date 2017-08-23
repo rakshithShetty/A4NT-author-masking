@@ -97,7 +97,8 @@ def main(params):
         else:
             c_aid = None
 
-        batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'], aid=c_aid)
+        batch = dp.get_sentence_batch(params['batch_size'], split='train',
+                    atoms=params['atoms'], aid=c_aid, sample_by_len = params['sample_by_len'])
         inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=params['max_seq_len'])
         # Reset the hidden states for which new docs have been sampled
 
@@ -165,6 +166,11 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('-d', '--dataset', dest='dataset', default='pan16AuthorMask', help='dataset: pan')
   parser.add_argument('--datasetfile', dest='dataset_file', default='dataset.json', help='dataset: pan')
+  # dataset options
+  parser.add_argument('--authstring', dest='authstring', type=str, default='author', help='which label to use as author')
+  parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
+  parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
+
   # mode
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')

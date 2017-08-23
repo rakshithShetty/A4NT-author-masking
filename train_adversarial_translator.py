@@ -93,7 +93,7 @@ def disp_gen_samples(modelGen, modelEval, dp, misc, maxlen=100, n_disp=5, atoms=
     inps, targs, auths, lens = dp.prepare_data(
         batch, misc['char_to_ix'], misc['auth_to_ix'], maxlen=maxlen)
 
-    outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix']['.'], backprop_for='None',
+    outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix'][misc['endc']], backprop_for='None',
                     maxlen=maxlen, auths=auths, cycle_compute=True,
                     append_symb=append_tensor, temp=params['gumbel_temp'], GradFilterLayer = None)
 
@@ -248,6 +248,10 @@ def main(params):
     params['num_output_layers'] = len(misc['auth_to_ix'])
     eval_params['generic_classifier'] = params['generic_classifier']
 
+    # Start and end characters
+    misc['startc'] = dp.data['configs']['start']
+    misc['endc'] = dp.data['configs']['end']
+
     modelGen = CharTranslator(params)
     modelEval = CharLstm(eval_params)
     # If using encoder for cycle loss
@@ -343,12 +347,12 @@ def main(params):
     eval_function = eval_translator if params['mode'] == 'generative' else eval_classify
     leakage = 0.  # params['leakage']
     append_tensor = np.zeros((1, params['batch_size'], params['vocabulary_size'] + 1), dtype=np.float32)
-    append_tensor[:, :, misc['char_to_ix']['2']] = 1
+    append_tensor[:, :, misc['char_to_ix'][misc['startc']] = 1
     append_tensor = Variable(torch.FloatTensor(
         append_tensor), requires_grad=False).cuda()
     # Another for the displaying cycle reconstruction
     append_tensor_disp = np.zeros((1, 5, params['vocabulary_size'] + 1), dtype=np.float32)
-    append_tensor_disp[:, :, misc['char_to_ix']['2']] = 1
+    append_tensor_disp[:, :, misc['char_to_ix'][misc['startc']]] = 1
     append_tensor_disp = Variable(torch.FloatTensor(
         append_tensor_disp), requires_grad=False).cuda()
 
@@ -398,7 +402,7 @@ def main(params):
                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'])
             # outs are organized as
             outs = adv_forward_pass(modelGen, modelEval, inps, lens,
-                                    end_c=misc['char_to_ix']['.'], backprop_for='eval',
+                                    end_c=misc['char_to_ix'][misc['endc']], backprop_for='eval',
                                     maxlen=params['max_seq_len'], auths=auths, temp=params['gumbel_temp'])
 
             targets = Variable(auths).cuda()
@@ -506,7 +510,7 @@ def main(params):
                     aid=misc['ix_to_auth'][c_aid])
         inps, targs, auths, lens = dp.prepare_data(batch, misc['char_to_ix'], misc['auth_to_ix'],
                     maxlen=params['max_seq_len'])
-        outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix']['.'],
+        outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix'][misc['endc']],
                     maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
                     cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
                     GradFilterLayer = GradFilterLayer, cycle_loss_type = params['cycle_loss_type'])

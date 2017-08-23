@@ -208,8 +208,8 @@ if __name__ == "__main__":
   parser.add_argument('--use_sgd', dest='use_sgd', type=int, default=0, help='Use sgd')
   parser.add_argument('-m', '--max_epochs', dest='max_epochs', type=int, default=50, help='number of epochs to train for')
 
-  parser.add_argument('--drop_prob_encoder', dest='drop_prob_encoder', type=float, default=0.5, help='what dropout to apply right after the encoder to an RNN/LSTM')
-  parser.add_argument('--drop_prob_decoder', dest='drop_prob_decoder', type=float, default=0.5, help='what dropout to apply right before the decoder in an RNN/LSTM')
+  parser.add_argument('--drop_prob_encoder', dest='drop_prob_encoder', type=float, default=0.25, help='what dropout to apply right after the encoder to an RNN/LSTM')
+  parser.add_argument('--drop_prob_decoder', dest='drop_prob_decoder', type=float, default=0.25, help='what dropout to apply right before the decoder in an RNN/LSTM')
 
   # For regularization
   parser.add_argument('--leakage', dest='leakage', type=float, default=0., help='Leakage rate initially')

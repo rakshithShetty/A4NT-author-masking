@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch import tensor
-from model_utils import packed_mean
+from model_utils import packed_mean, packed_add
 import torch.nn.functional as FN
 
 class CharLstm(nn.Module):
@@ -89,14 +89,17 @@ class CharLstm(nn.Module):
             p_out = packed
             hid_all = []
             for i in xrange(self.num_rec_layers):
-                out, hid = self.rec_layers[i](p_out, (h_prev[0][i:i+1], h_prev[1][i:i+1]))
+                if h_prev == None :
+                    out, hid = rec_func[i](p_out)
+                else:
+                    out, hid = self.rec_layers[i](p_out, (h_prev[0][i:i+1], h_prev[1][i:i+1]))
                 if i > 0:
                     # Add residual connections after every layer
-                    p_out = p_out + out
+                    p_out = packed_add(p_out, out) if type(p_out) == torch.nn.utils.rnn.PackedSequence else p_out + out
                 else:
                     p_out = out
                 hid_all.append(hid)
-            hidden = (torch.cat([hid[0] for hid in hid_all],dim=-1), torch.cat([hid[1] for hid in hid_all],dim=-1))
+            hidden = (torch.cat([hid[0] for hid in hid_all],dim=0), torch.cat([hid[1] for hid in hid_all],dim=0))
             rnn_out = p_out
         else:
             if h_prev == None:
