@@ -41,6 +41,7 @@ def main(params):
 
     params['vocabulary_size'] = len(char_to_ix)
     params['num_output_layers'] = len(auth_to_ix)
+    print params['vocabulary_size'], params['num_output_layers']
 
     model = CharLstm(params)
     # set to train mode, this activates dropout
@@ -72,7 +73,7 @@ def main(params):
 
     # Compute the iteration parameters
     epochs = params['max_epochs']
-    total_seqs = dp.get_num_seqs(maxlen=params['max_seq_len'], split='train')
+    total_seqs = dp.get_num_sents(split='train')
     iter_per_epoch = total_seqs // params['batch_size']
     total_iters = iter_per_epoch * epochs
     best_loss = 0.
@@ -93,7 +94,7 @@ def main(params):
             b_ids = [b['id'] for b in batch]
             hidden = dp.get_hid_cache(b_ids, hidden)
         elif params['use_sentences']:
-            batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'])
+            batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'], sample_by_len = params['sample_by_len'])
             hidden = hidden_zeros
         else:
             batch, reset_h = dp.get_doc_batch(split='train')
@@ -175,9 +176,13 @@ def main(params):
 if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
-  parser.add_argument('-d', '--dataset', dest='dataset', default='pan16AuthorMask', help='dataset: pan')
-  parser.add_argument('--datasetfile', dest='dataset_file', default='dataset.json', help='dataset file')
+  parser.add_argument('-d', '--dataset', dest='dataset',  type=str, default='pan16AuthorMask', help='dataset: pan')
+  parser.add_argument('--datasetfile', dest='dataset_file', type=str, default='dataset.json', help='dataset file')
   # mode
+  parser.add_argument('--authstring', dest='authstring', type=str, default='author', help='which label to use as author')
+  parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
+  parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
+
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')

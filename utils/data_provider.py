@@ -33,7 +33,28 @@ class DataProvider():
         self.cur_char_idx = np.ones(len(self.data['docs']),dtype=np.int)
 
         self.hid_cache = {}
+        self.athstr = 'author' if params.get('authstring',None) == None else params['authstring']
+        self.use_unk = params.get('use_unk',0)
 
+        if(dataset == 'blogdata'):
+            self.min_len = 2
+            self.max_len = 32
+        elif(dataset == 'speechdata'):
+            self.min_len = 2
+            self.max_len = 30
+        else:
+            raise ValueError('ERROR: Dont know how to do len splitting for this dataset')
+
+        lenHist = defaultdict(int)
+        self.lenMap = defaultdict(list)
+        for iid in self.splits['train']:
+          doc = self.data['docs'][iid]
+          for sid, tkn in enumerate(doc['tokens']):
+            ix = max(min(len(tkn.split()),self.max_len),self.min_len)
+            lenHist[ix] += 1
+            self.lenMap[ix].append((iid,sid))
+
+        self.lenCdist = np.cumsum(lenHist.values())
         return
 
     def set_hid_cache(self, idces, hid_state):
@@ -82,7 +103,7 @@ class DataProvider():
             while not dead:
                 batch = []
                 inp, targ, dead, cur_char_idx = self.get_nextstring_doc(cid, cur_char_idx)
-                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author']})
+                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr]})
                 yield batch, dead
 
     def iter_sentences(self, split='train', batch_size=100, atoms='char'):
@@ -94,8 +115,8 @@ class DataProvider():
 
         for i,cid in enumerate(self.splits[split]):
             for j in xrange(self.get_num_sent_doc(cid, atoms=atoms)):
-                inp, targ = sent_func[atoms](cid, sidx=[j])
-                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'], 'id':cid})
+                inp, targ = sent_func[atoms](cid, sidx=j)
+                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr], 'id':cid})
                 if len(batch) == batch_size:
                     yield batch, j == (self.get_num_sent_doc(cid,atoms=atoms))
                     batch = []
@@ -148,7 +169,7 @@ class DataProvider():
         for i,cid in enumerate(self.cur_batch):
             inp, targ, dead, self.cur_char_idx = self.get_nextstring_doc(cid, self.cur_char_idx)
             self.cur_batch[i] = -1 if dead else cid
-            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'],'id':cid})
+            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr],'id':cid})
 
         return batch, dead_ids
 
@@ -158,7 +179,7 @@ class DataProvider():
         dead_ids_next_it = []
         for i,cid in enumerate(batch_ids):
             inp, targ, dead, self.cur_char_idx = self.get_nextstring_doc(cid, self.cur_char_idx)
-            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'],
+            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr],
                 'id':cid})
             if dead:
                 dead_ids_next_it.append(i)
@@ -172,7 +193,7 @@ class DataProvider():
             import ipdb;ipdb.set_trace()
 
         sidx = np.random.randint(0,len(sents),1) if sidx == None else sidx
-        s = sents[sidx[0]].split()
+        s = sents[sidx].split()
 
         targ = s[1:]
         inp = s[:-1]
@@ -195,16 +216,39 @@ class DataProvider():
             inp = '2'+s
         return inp, targ
 
-    def get_sentence_batch(self, batch_size, split='train', atoms='char', aid=None):
-        if aid == None:
-            batch_ids = np.random.choice(self.splits[split], batch_size, replace=False)
-        else:
-            batch_ids = np.random.choice([idx for idx in self.splits[split] if self.data['docs'][idx]['author'] == aid], batch_size, replace=False)
+    def getRandLen(self):
+      """ sample image sentence pair from a split """
+
+      rn = np.random.randint(0,self.lenCdist[-1])
+      for l in xrange(len(self.lenCdist)):
+          if rn < self.lenCdist[l] and (len(self.lenMap[l + self.min_len]) > 0):
+              break
+
+      l += self.min_len
+      return l
+  #def getRandBatchByLen(self,batch_size):
+  #  """ sample image sentence pair from a split """
+
+  #  rn = np.random.randint(0,self.lenCdist[-1])
+  #  for l in xrange(len(self.lenCdist)):
+  #      if rn < self.lenCdist[l] and (len(self.lenMap[l + self.min_len]) > 0):
+  #          break
+
+  #  l += self.min_len
+  #  batch = [self.sampleImageSentencePairByLen(l) for i in xrange(batch_size)]
+  #  return batch,l
+    def get_sentence_batch(self, batch_size, split='train', atoms='char', aid=None, sample_by_len = False):
+        allids = self.lenMap[self.getRandLen()] if sample_by_len else self.splits[split]
+        if aid:
+            allids = [idx for idx in allids if self.data['docs'][idx][self.athstr] == aid]
+
+        batch_ids = [allids[i] for i in np.random.randint(0, len(allids), batch_size)]
         batch = []
         sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
         for i,cid in enumerate(batch_ids):
-            inp, targ = sent_func[atoms](cid)
-            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid]['author'],
+            inp, targ = sent_func[atoms](*cid)
+            cid = cid if not sample_by_len else cid[0]
+            batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr],
                 'id':cid})
         return batch
 
@@ -249,8 +293,8 @@ class DataProvider():
         author_idx = {}
         n_authors = 0
         for i in self.splits['train']:
-            if self.data['docs'][i]['author'] not in author_idx:
-                author_idx[self.data['docs'][i]['author']] = n_authors
+            if self.data['docs'][i][self.athstr] not in author_idx:
+                author_idx[self.data['docs'][i][self.athstr]] = n_authors
                 n_authors = n_authors + 1
 
         ix_to_author = {author_idx[a]:a for a in author_idx}
@@ -282,5 +326,13 @@ class DataProvider():
             if vocab[c] >= threshold:
                 minivocab[c] = len(minivocab) +1
                 ixtochar[minivocab[c]] = c
+        if self.use_unk:
+            minivocab['UNK'] = len(minivocab) +1
+            ixtochar[minivocab['UNK']]= 'UNK'
+            print 'Replacing unknown tokens with UNK'
+            for i,doc in enumerate(self.data['docs']):
+                for j, tk in enumerate(doc['tokens']):
+                    self.data['docs'][i]['tokens'][j] = ' '.join([w if w in minivocab else 'UNK' for w in tk.split()])
+
         print 'Vocabulary size is %d'%(len(minivocab))
         return minivocab, ixtochar

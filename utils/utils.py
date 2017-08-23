@@ -6,6 +6,7 @@ import sklearn
 from sklearn.metrics import roc_auc_score
 import cPickle as pickle
 from collections import defaultdict
+import torch.nn.functional as FN
 
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -109,8 +110,9 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
             c_sz = len(b_data[0])
         done = b_data[1]
         inps, targs, auths, lens = dp.prepare_data(b_data[0], char_to_ix, auth_to_ix)
-        output, _ = model.forward_classify(inps, hidden_zero, compute_softmax=True,
+        output, _ = model.forward_classify(inps, hidden_zero, compute_softmax=False,
                 predict_mode=True, lens=lens)
+        output = FN.LogSoftmax(output.contiguous())
         z = output.data.cpu().numpy()
         scores = z
         correct_textblock = correct_textblock + (scores.argmax(axis=1) == auths.numpy()).sum()

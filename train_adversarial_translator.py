@@ -77,9 +77,9 @@ def nll_loss(outputs, targets):
     return torch.gather(outputs, 1, targets.view(-1, 1))
 
 
-def save_checkpoint(state, fappend='dummy', outdir='cv'):
+def save_checkpoint(state, fappend='dummy', outdir='cv', epoch=0.):
     filename = os.path.join(outdir, 'checkpoint_gan_' +
-                            fappend + '_' + '%.2f' % (state['val_pplx']) + '.pth.tar')
+                            fappend + '_' + '%.2f' % (state['val_pplx']) + '%.1f'%epoch+ '.pth.tar')
     torch.save(state, filename)
 
 
@@ -113,7 +113,7 @@ def disp_gen_samples(modelGen, modelEval, dp, misc, maxlen=100, n_disp=5, atoms=
 
 
 def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all', maxlen=100, auths=None,
-                     cycle_compute=False, cycle_limit_backward=False, append_symb=None, temp=0.5, GradFilterLayer=None):
+                     cycle_compute=False, cycle_limit_backward=False, append_symb=None, temp=0.5, GradFilterLayer=None, cycle_loss_type = 'enc'):
     if backprop_for == 'eval' or backprop_for=='None':
         modelGen.eval()
     else:
@@ -153,28 +153,32 @@ def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all
 
     if cycle_compute and backprop_for != 'eval':
         reverse_inp = torch.cat([append_symb, gen_samples_srt])
+        # Undo the lensorting done on top
         #reverse_inp = reverse_inp.detach()
         if cycle_limit_backward:
             for p in modelGen.parameters():
                 p.requires_grad = False
-        rev_gen_samples, rev_gen_lens, rev_char_outs = modelGen.forward_advers_gen(reverse_inp, len_sorted.tolist(),
-                                                                                   soft_samples=True, end_c=end_c,
-                                                                                   n_max=maxlen, temp=temp, auths=auths, adv_inp=True)
-        rev_gen_samples = torch.cat(
-            [torch.unsqueeze(gs, 0) for gs in rev_gen_samples], dim=0)
+        if cycle_loss_type != 'ml':
+            rev_gen_samples, rev_gen_lens, rev_char_outs = modelGen.forward_advers_gen(reverse_inp,
+                                                                len_sorted.tolist(), soft_samples=True,
+                                                                end_c=end_c, n_max=maxlen, temp=temp,
+                                                                auths=auths, adv_inp=True)
+            rev_gen_samples = torch.cat( [torch.unsqueeze(gs, 0) for gs in rev_gen_samples], dim=0)
+            rev_gen_samples_orig_order = rev_gen_samples.index_select(1, rev_sort_idx)
+            rev_gen_samples_orig_order = GradFilter(2)(rev_gen_samples_orig_order) if GradFilterLayer else rev_gen_samples_orig_order
+            rev_gen_lens = rev_gen_lens.index_select(0, rev_sort_idx.data)
+            rev_char_outs = [rc.index_select(0,rev_sort_idx.data) for rc in rev_char_outs]
+            samples_out = (gen_samples_tensor, gen_lens, char_outs, rev_gen_samples_orig_order, rev_gen_lens, rev_char_outs)
+        else:
+            rev_ml_out, _ = modelGen.forward_mltrain(reverse_inp, len_sorted.tolist(), inps, lens, auths=auths,
+                                                    adv_inp=True, sort_enc=rev_sort_idx)
+            samples_out = (gen_samples_tensor, gen_lens, char_outs, rev_ml_out)
 
         if cycle_limit_backward:
             for p in modelGen.parameters():
                 p.requires_grad = True
-        # Undo the lensorting done on top
-        gen_samples_orig_order = gen_samples_srt.index_select(1, rev_sort_idx)
-        rev_gen_samples_orig_order = rev_gen_samples.index_select(1, rev_sort_idx)
-        rev_gen_samples_orig_order = GradFilter(2)(rev_gen_samples_orig_order) if GradFilterLayer else rev_gen_samples_orig_order
-        rev_gen_lens = rev_gen_lens.index_select(0, rev_sort_idx.data)
-        rev_char_outs = [rc.index_select(0,rev_sort_idx.data) for rc in rev_char_outs]
-        samples_out = (gen_samples_orig_order, gen_lens, char_outs, rev_gen_samples_orig_order, rev_gen_lens, rev_char_outs)
     else:
-        samples_out = (gen_samples, gen_lens)
+        samples_out = (gen_samples_tensor, gen_lens)
 
     return (eval_out_gen_sort,) + eval_out_gen[1:] + samples_out
 
@@ -209,7 +213,8 @@ def main(params):
                 params['loadeval']) if params['loadeval'] else saved_model
             model_eval_state = saved_eval_model['state_dict_eval'] if params[
                 'loadeval'] == None else saved_eval_model['state_dict']
-            eval_params = saved_eval_model['eval_arch']
+            eval_params = saved_eval_model['arch'] if params['loadeval'] else saved_eval_model['eval_arch']
+
             restore_eval = True
             #assert(not any([saved_eval_model['ix_to_char'][k] != saved_model['ix_to_char'][k]
             #                for k in saved_eval_model['ix_to_char']]))
@@ -273,7 +278,7 @@ def main(params):
     # Do size averaging here so that classes are balanced
     bceLogitloss = nn.BCEWithLogitsLoss(size_average=True)
     eval_generic = nn.BCELoss(size_average=True)
-    cycle_loss_func = nn.L1Loss() if params['cycle_loss_type'] == 'bow' else nn.L1Loss()
+    cycle_loss_func = nn.CrossEntropyLoss() if params['cycle_loss_type'] == 'ml' else nn.L1Loss()
     featmatch_l2_loss = nn.L1Loss()
     ml_criterion = nn.CrossEntropyLoss()
     accuracy_lay = nn.L1Loss()
@@ -300,6 +305,7 @@ def main(params):
 
     avg_acc_geneval = 0.
     avg_cyc_loss = 0.
+    avg_feat_loss = 0.
     err_a1 = 1.; err_a2 = 1.
     accum_diff_eval = np.zeros(len(auth_to_ix))
     accum_err_eval = np.zeros(len(auth_to_ix))
@@ -370,6 +376,8 @@ def main(params):
 
     #pr = cProfile.Profile()
     #pr.enable()
+    #batch = dp.get_sentence_batch( params['batch_size'], split='train', atoms=params['atoms'],
+    #            aid=misc['ix_to_auth'][0])
     for i in xrange(total_iters):
         # Update the evaluator and get it into a good state.
         it2 = 0
@@ -501,7 +509,7 @@ def main(params):
         outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix']['.'],
                     maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
                     cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
-                    GradFilterLayer = GradFilterLayer)
+                    GradFilterLayer = GradFilterLayer, cycle_loss_type = params['cycle_loss_type'])
         #---------------------------------------------------------------------
         # Get a batch of other author samples. This is for feature mathcing loss
         #---------------------------------------------------------------------
@@ -536,15 +544,16 @@ def main(params):
                                                                                                            torch.ones(targs.size()[::-1]).cuda()).index_fill_(1, torch.cuda.LongTensor([0]), 0), requires_grad=False)
             # cyc_targ.index_fill_(1,torch.cuda.LongTensor([0]),0)
             cyc_loss = params['cycle_loss_w'] * cycle_loss_func(outs[-3].sum(dim=0), cyc_targ)
+            rev_char_outs = outs[-1]; rev_gen_lens = outs[-2]
+            char_outs = outs[4]; gen_lens = outs[3]
         elif params['cycle_loss_type'] == 'enc':
             # Compute encodings for the groundtruth!
             enc_inp_gt = modelGenEncoder.forward_encode(inps, lens)
-
             #-----------------------------------------------------------------------------------------------------------
             # Compute encodings for the generated reverse sample!
             #-----------------------------------------------------------------------------------------------------------
-            gen_samples, gen_lens, char_outs = outs[-3], outs[-2], outs[-1]
-            len_sorted, gen_lensort_idx = gen_lens.sort(dim=0, descending=True)
+            gen_lens, char_outs, gen_samples, rev_gen_lens, rev_char_outs = outs[3], outs[4], outs[-3], outs[-2], outs[-1]
+            len_sorted, gen_lensort_idx = rev_gen_lens.sort(dim=0, descending=True)
             _, rev_sort_idx = gen_lensort_idx.sort(dim=0)
             rev_sort_idx = Variable(rev_sort_idx, requires_grad=False)
             gen_samples_srt = gen_samples.index_select(1, Variable(gen_lensort_idx, requires_grad=False))
@@ -554,11 +563,15 @@ def main(params):
             rev_enc_orig_order = rev_enc.index_select(0, rev_sort_idx)
             #-----------------------------------------------------------------------------------------------------------
             cyc_loss = params['cycle_loss_w'] * cycle_loss_func(rev_enc_orig_order, enc_inp_gt.detach())
-            #print '%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
-            #print '%d Out : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c[0]] for c in char_outs[:gen_lens[0]]]))
+        elif params['cycle_loss_type'] == 'ml':
+            rev_ml = outs[-1]
+            rev_mlTarg = pack_padded_sequence(Variable(targs).cuda(), lens)
+            cyc_loss = params['cycle_loss_w']*ml_criterion(pack_padded_sequence(rev_ml,lens)[0], rev_mlTarg[0])
         else:
             cyc_loss = 0.
-
+        #print '\n%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
+        ##print '%d Rev : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c[0]] for c in rev_char_outs[:rev_gen_lens[0]]]))
+        #print '%d Out : %s --> %s' % (0, misc['ix_to_auth'][1-auths[0]], ' '.join([ix_to_char[c[0]] for c in char_outs[:gen_lens[0]]]))
         if 0:
             lossGen = eval_criterion(outs[0], ((-1 * targets) + 1)) + cyc_loss
         elif not params['wasserstien_loss']:
@@ -575,7 +588,7 @@ def main(params):
         accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean() + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
         accum_count_gen[targ_aid] += 1.
         lossGenTot = mlLoss + lossGen + cyc_loss + feature_match_loss
-        #lossGenTot = cyc_loss#mlLoss + lossGen + cyc_loss + feature_match_loss
+        #lossGenTot = cyc_loss# +mlLoss #+ lossGen + cyc_loss + feature_match_loss
         #g = make_dot(lossGenTot,{n:p for n,p in modelGen.named_parameters()})
         #import ipdb; ipdb.set_trace()
 
@@ -593,14 +606,15 @@ def main(params):
         optimGen.step()
         avgL_gen += lossGenTot.data.cpu().numpy()[0]
         avg_cyc_loss += cyc_loss.data.cpu().numpy()[0] if type(cyc_loss) != float else cyc_loss
+        avg_feat_loss+= feature_match_loss.data.cpu().numpy()[0] if type(feature_match_loss) != float else feature_match_loss
         #===========================================================================
 
         # Visualize some generator samples once in a while
-        if i % 100 == 99:
+        if i % 200 == 199:
             disp_gen_samples( modelGen, modelEval, dp, misc,
                     maxlen=params['max_seq_len'], atoms=params['atoms'],
                     append_tensor=append_tensor_disp)
-        skip_first = 1
+        skip_first = 50 if i%500==499 else 1
         # Monitor the Error more frequently
         if i % 10 == 9:
             err_a1, err_a2 = accum_err_eval[0]/accum_count_gen[0], accum_err_eval[1]/accum_count_gen[1]
@@ -608,6 +622,7 @@ def main(params):
         if i % params['log_interval'] == (params['log_interval'] - 1):
             interv = params['log_interval']
             lossGcyc = avg_cyc_loss / interv
+            lossGfeat = avg_feat_loss / interv
             lossG = avgL_gen / interv
             lossEv_tot = avgL_eval / (accum_count_eval.sum()+1e-5) + (accum_count_eval.sum()==0) * lossEv_tot
             lossEv_gt = avgL_gt / (accum_count_eval.sum()+1e-5) + (accum_count_eval.sum()==0) * lossEv_gt
@@ -617,9 +632,9 @@ def main(params):
             lossEv_diff1 = accum_diff_eval[1]/(accum_count_eval[1]+1e-5) + (accum_count_eval[1]==0) * lossEv_diff1
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2e} | ms/it {:5.2f} | '
-                  'loss - G {:3.2f} - Gc {:3.2f} - E {:3.2f} - erra1 {:3.2f} - erra2 {:3.2f} - Ec {:3.2f}|'.format(
+                  'loss - G {:3.2f} - Gc {:3.2f} - Gf {:3.2f} - E {:3.2f} - erra1 {:3.2f} - erra2 {:3.2f} - Ec {:3.2f}|'.format(
                       i // iter_per_epoch, i, total_iters, params['learning_rate_gen'],
-                      elapsed * 1000 / args.log_interval, lossG, lossGcyc, lossEv_tot, 100.*err_a1, 100.*err_a2,
+                      elapsed * 1000 / args.log_interval, lossG, lossGcyc, lossGfeat, lossEv_tot, 100.*err_a1, 100.*err_a2,
                       lossEv_const))
 
             if params['tensorboard']:
@@ -642,7 +657,7 @@ def main(params):
             accum_count_gen = np.zeros(len(auth_to_ix))
             avg_acc_geneval = 0.
             avg_cyc_loss = 0.
-
+            avg_feat_loss = 0.
             if val_rank <= best_val and i > 0:
                 save_checkpoint({
                     'iter': i,
@@ -657,7 +672,7 @@ def main(params):
                     'optimizerGen': optimGen.state_dict(),
                     'optimizerEval': optimEval.state_dict(),
                 }, fappend=params['fappend'],
-                    outdir=params['checkpoint_output_directory'])
+                    outdir=params['checkpoint_output_directory'], epoch = 5.0*(i // (5.0*iter_per_epoch)))
                 best_val = val_rank
             start_time = time.time()
     #pr.disable()
@@ -775,6 +790,8 @@ if __name__ == "__main__":
                         dest='feature_matching', type=float, default=None)
     parser.add_argument('--cycle_loss_type',
                         dest='cycle_loss_type', type=str, default=None)
+    parser.add_argument('--cycle_loss_enc_meanvec',
+                        dest='encoder_mean_vec', type=int, default=1)
     parser.add_argument('--cycle_loss_w',
                         dest='cycle_loss_w', type=float, default=0.)
     parser.add_argument('--cycle_loss_limitback',
@@ -795,7 +812,7 @@ if __name__ == "__main__":
     parser.add_argument('--softmax_scale',
                         dest='softmax_scale', type=float, default=3.0)
     parser.add_argument('--gumbel_hard',
-                        dest='gumbel_type', type=bool, default=True)
+                        dest='gumbel_hard', type=bool, default=True)
 
 
     args = parser.parse_args()

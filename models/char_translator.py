@@ -189,14 +189,22 @@ class CharTranslator(nn.Module):
                 rnn_out, hidden = rec_func(packed, h_prev)
         return rnn_out, hidden
 
-    def forward_mltrain(self, inp, lengths_inp, targ, lengths_targ, h_prev=None, compute_softmax = False, auths=None):
+    def forward_mltrain(self, inp, lengths_inp, targ, lengths_targ, h_prev=None, compute_softmax = False, auths=None, adv_inp=False, sort_enc=None):
         # x should be a numpy array of n_seq x n_batch dimensions
         b_sz = inp.size(1)
         n_steps = inp.size(0)
-        inp = Variable(inp).cuda()
+
+        if not adv_inp:
+            if self.training:
+                inp = Variable(inp).cuda()
+            else:
+                inp = Variable(inp,volatile=True).cuda()
+
+            emb = self.emb_drop(self.char_emb(inp))
+        else:
+            emb = inp.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1)
 
         # Embed the sequence of characters
-        emb = self.emb_drop(self.char_emb(inp))
         packed = pack_padded_sequence(emb, lengths_inp)
 
         # Encode the sequence of input characters
@@ -212,13 +220,18 @@ class CharTranslator(nn.Module):
         else:
             ctxt = enc_hidden[0][0]
 
+        if type(sort_enc) != type(None):
+            ctxt_sorted = ctxt.index_select(0,sort_enc)
+        else:
+            ctxt_sorted = ctxt
+
         if self.pad_auth_vec:
-            ctxt = torch.cat([ctxt,self.auth_emb(Variable(auths).cuda())], dim=-1)
+            ctxt_sorted = torch.cat([ctxt_sorted,self.auth_emb(Variable(auths).cuda())], dim=-1)
 
         if self.enc_noise:
-            ctxt = ctxt + Variable(torch.cuda.FloatTensor(ctxt.size()).normal_()/10., requires_grad=False)
+            ctxt_sorted = ctxt_sorted + Variable(torch.cuda.FloatTensor(ctxt_sorted.size()).normal_()/20., requires_grad=False)
         else:
-            ctxt = self.enc_drop(ctxt)
+            ctxt_sorted = self.enc_drop(ctxt_sorted)
 
         # Setup target variable now
         targ = Variable(targ).cuda()
@@ -226,7 +239,7 @@ class CharTranslator(nn.Module):
         # Concat the context vector from the encoder
         n_steps_targ = targ.size(0)
 
-        dec_inp = torch.cat([ctxt.expand(n_steps_targ,b_sz,ctxt.size(1)), targ_emb], dim=-1)
+        dec_inp = torch.cat([ctxt_sorted.expand(n_steps_targ,b_sz,ctxt_sorted.size(1)), targ_emb], dim=-1)
         targ_packed = pack_padded_sequence(dec_inp, lengths_targ)
 
         # Decode the output sequence using encoder state
@@ -263,9 +276,9 @@ class CharTranslator(nn.Module):
             else:
                 x = Variable(x,volatile=True).cuda()
 
-            emb = self.emb_drop(self.char_emb(x))
+            emb = self.char_emb(x)
         else:
-            emb = self.emb_drop(x.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1))
+            emb = x.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1)
         packed = pack_padded_sequence(emb, lengths_inp)
 
 
@@ -278,7 +291,7 @@ class CharTranslator(nn.Module):
                 dim=-1)
         else:
             ctxt = enc_hidden[0][0]
-        return enc_hidden[0][0]
+        return ctxt
 
     def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None, adv_inp=False):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
@@ -293,9 +306,9 @@ class CharTranslator(nn.Module):
             else:
                 x = Variable(x,volatile=True).cuda()
 
-            emb = self.emb_drop(self.char_emb(x))
+            emb = self.char_emb(x)
         else:
-            emb = self.emb_drop(x.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1))
+            emb = x.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1)
         packed = pack_padded_sequence(emb, lengths_inp)
 
 
