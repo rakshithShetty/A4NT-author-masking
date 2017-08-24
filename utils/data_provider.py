@@ -245,9 +245,9 @@ class DataProvider():
         batch_ids = [allids[i] for i in np.random.randint(0, len(allids), batch_size)]
         batch = []
         sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
-        for i,cid in enumerate(batch_ids):
-            inp, targ = sent_func[atoms](*cid)
-            cid = cid if not sample_by_len else cid[0]
+        for i,cids in enumerate(batch_ids):
+            cid,sid = cids,None if not sample_by_len else cids
+            inp, targ = sent_func[atoms](cid,sid)
             batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr],
                 'id':cid})
         return batch
