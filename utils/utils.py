@@ -85,7 +85,7 @@ def eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs=
 def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs=-1,
         dump_scores=False):
     #We go one document at a time and evaluate it using all the authors
-    b_sz = 100
+    b_sz = 1000
     hidden_zero = model.init_hidden(b_sz)
     c_sz = b_sz
     correct = 0.
@@ -101,6 +101,9 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
     all_window_scores = defaultdict(list)
     all_auths = []
     correct_textblock = 0.
+    correct_textblock_perclass = np.zeros(model.num_output_layers)
+    ix_to_auth = {auth_to_ix[a]: a for a in auth_to_ix}
+    block_perclass = np.zeros(model.num_output_layers)
     correct_textblock_topk = 0.
     n_blks = 0.
     for i, b_data in tqdm(enumerate(dp.iter_sentences(split=split, atoms=params.get('atoms','char'), batch_size = b_sz))):
@@ -118,6 +121,11 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
         correct_textblock = correct_textblock + (scores.argmax(axis=1) == auths.numpy()).sum()
         correct_textblock_topk += (np.where(scores.argsort(axis=1)[:,::-1]==auths.numpy()[:,None])[1]<=params.get('topk',5)).sum()
         n_blks = n_blks+c_sz
+
+        # Accumulate accuracies per class
+        np.add.at(correct_textblock_perclass, auths.numpy(), (scores.argmax(axis=1) == auths.numpy()))
+        np.add.at(block_perclass, auths.numpy(), 1.)
+
         # Accumulate the scores for each doc.
         current_doc_score = current_doc_score + scores.sum(axis=0)
         if dump_scores:
@@ -145,6 +153,10 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
     print 'Top-%d Accuracy is %.2f'%(params.get('topk',5), 100.*(correct_topk/n_docs))
     print 'Block level accuracy is %.3f.'%(100. * (correct_textblock/n_blks))
     print 'Top-%d Block Accuracy is %.2f'%(params.get('topk',5), 100. *(correct_textblock_topk/n_blks))
+
+    for i in xrange(model.num_output_layers):
+        print 'Block level accuracy of class %s is %.2f.'%(ix_to_auth[i], 100. * (correct_textblock_perclass[i]/block_perclass[i]))
+
     print 'Corr is %.2f | Max is %.2f | Min is %.2f'%(mean_corr_prob/n_docs, mean_max_prob/n_docs, mean_min_prob/n_docs)
     print '-----------------------------------'
 

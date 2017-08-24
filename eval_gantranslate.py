@@ -167,9 +167,9 @@ def main(params):
             print '--------------------------------------------'
             print 'Author: %s'%(b_data[0][0]['author'])
             print 'Inp text %s: %s (%.2f)'%(ix_to_auth[auths[0]], jc.join([ix_to_char[c[0]] for c in inps[1:]]), real_aid_out[0])
-            print 'Out text %s: %s (%.2f)'%(ix_to_auth[auths_inp[0]],jc.join([ix_to_char[c.data.cpu()[0]] for c in outs[1]]), gen_aid_out[0])
+            print 'Out text %s: %s (%.2f)'%(ix_to_auth[auths_inp[0]],jc.join([ix_to_char[c.cpu()[0]] for c in outs[1]]), gen_aid_out[0])
             if params['show_rev']:
-                print 'Rev %s: '%(ix_to_auth[auths[0]])+ '%s'%(jc.join([ix_to_char[c.cpu()[0]] for c in outs[-2]]))
+                print 'Rev text %s: '%(ix_to_auth[auths[0]])+ '%s'%(jc.join([ix_to_char[c.cpu()[0]] for c in outs[-2]]))
         #else:
         #    print '%d/%d\r'%(i, params['num_samples']),
 

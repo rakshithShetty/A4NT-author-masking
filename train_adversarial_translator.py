@@ -399,7 +399,7 @@ def main(params):
             batch_inpauth = dp.get_sentence_batch(params['batch_size'], split='train',
                                                   atoms=params['atoms'], aid=misc['ix_to_auth'][c_aid])
             inps, targs, auths, lens = dp.prepare_data(batch_inpauth, misc['char_to_ix'],
-                                                  misc['auth_to_ix'], maxlen=params['max_seq_len'])
+                                                  misc['auth_to_ix'], maxlen=params['max_seq_len'], sample_by_len = params['sample_by_len'])
             # outs are organized as
             outs = adv_forward_pass(modelGen, modelEval, inps, lens,
                                     end_c=misc['char_to_ix'][misc['endc']], backprop_for='eval',
@@ -414,7 +414,7 @@ def main(params):
             batch_targauth = dp.get_sentence_batch(params['batch_size'], split='train',
                                                    atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid])
             gttargInps, gttargtargs, _, gtlens = dp.prepare_data(batch_targauth, misc['char_to_ix'],
-                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'])
+                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'], sample_by_len = params['sample_by_len'])
 
             eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
             #---------------------------------------------------------------------
@@ -509,7 +509,7 @@ def main(params):
         batch = dp.get_sentence_batch( params['batch_size'], split='train', atoms=params['atoms'],
                     aid=misc['ix_to_auth'][c_aid])
         inps, targs, auths, lens = dp.prepare_data(batch, misc['char_to_ix'], misc['auth_to_ix'],
-                    maxlen=params['max_seq_len'])
+                                    maxlen=params['max_seq_len'], sample_by_len = params['sample_by_len'])
         outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix'][misc['endc']],
                     maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
                     cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
@@ -521,7 +521,8 @@ def main(params):
             batch_targauth = dp.get_sentence_batch(params['batch_size'], split='train',
                                                    atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid])
             gttargInps, gttargtargs, gttargauths ,gtlens = dp.prepare_data(batch_targauth, misc['char_to_ix'],
-                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'])
+                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'],
+                                                   sample_by_len = params['sample_by_len'])
 
             eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
 
@@ -689,6 +690,13 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--dataset', dest='dataset',
                         default='pan16AuthorMask', help='dataset: pan')
     parser.add_argument('--datasetfile', dest='dataset_file', default='dataset.json', help='dataset: pan')
+
+    parser.add_argument('--authstring', dest='authstring', type=str, default='author', help='which label to use as author')
+    parser.add_argument('--filterauths', dest='filterauths', nargs='+', type=str, default=[], help='which author classes to keep')
+
+    parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
+    parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
+
     # mode
     parser.add_argument('--mode', dest='mode', type=str,
                         default='generative', help='print every x iters')

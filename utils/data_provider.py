@@ -19,6 +19,13 @@ class DataProvider():
         else:
             self.data = preproc_dataset(osp.join(datadir,'splits','train'), datadir)
 
+        self.athstr = 'author' if params.get('authstring',None) == None else params['authstring']
+
+        if len(params.get('filterauths', [])) > 0:
+            keepset = set(params['filterauths'])
+            print 'Keeping only %s'%keepset
+            self.data['docs'] = [doc for doc in self.data['docs'] if doc[self.athstr] in keepset]
+
         self.splits = defaultdict(list)
         for i,dc in enumerate(self.data['docs']):
             self.splits[dc['split']].append(i)
@@ -33,7 +40,7 @@ class DataProvider():
         self.cur_char_idx = np.ones(len(self.data['docs']),dtype=np.int)
 
         self.hid_cache = {}
-        self.athstr = 'author' if params.get('authstring',None) == None else params['authstring']
+
         self.use_unk = params.get('use_unk',0)
 
         if(dataset == 'blogdata'):

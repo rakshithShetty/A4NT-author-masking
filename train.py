@@ -180,6 +180,8 @@ if __name__ == "__main__":
   parser.add_argument('--datasetfile', dest='dataset_file', type=str, default='dataset.json', help='dataset file')
   # mode
   parser.add_argument('--authstring', dest='authstring', type=str, default='author', help='which label to use as author')
+  parser.add_argument('--filterauths', dest='filterauths', nargs='+', type=str, default=[], help='which author classes to keep')
+
   parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
   parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
 
