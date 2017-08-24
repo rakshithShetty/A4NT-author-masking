@@ -87,8 +87,11 @@ def main(params):
     model.eval()
     auth_colors = ['red', 'blue']
 
+    startc = dp.data['configs']['start']
+    endc = dp.data['configs']['end']
+
     append_tensor = np.zeros((1, 1), dtype=np.int)
-    append_tensor[0, 0] = char_to_ix['2']
+    append_tensor[0, 0] = char_to_ix[startc]
     append_tensor = torch.LongTensor(append_tensor).cuda()
 
     # Restore saved checkpoint
@@ -105,7 +108,7 @@ def main(params):
 
         inps, targs, auths, lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=cp_params['max_seq_len'])
         auths_inp = 1 - auths if params['flip'] else auths
-        outs = adv_forward_pass(model, inps, lens, end_c=char_to_ix['.'], maxlen=cp_params['max_seq_len'], auths=auths_inp,
+        outs = adv_forward_pass(model, inps, lens, end_c=char_to_ix[endc], maxlen=cp_params['max_seq_len'], auths=auths_inp,
                      cycle_compute=params['show_rev'], append_symb=append_tensor)
         #char_outs = model.forward_gen(inps, hidden, auths_inp, n_max = cp_params['max_len'],end_c=char_to_ix['.'])
         print '--------------------------------------------'
