@@ -246,7 +246,7 @@ class DataProvider():
         batch = []
         sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
         for i,cids in enumerate(batch_ids):
-            cid,sid = cids,None if not sample_by_len else cids
+            cid,sid = (cids) if sample_by_len else (cids,None)
             inp, targ = sent_func[atoms](cid,sid)
             batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr],
                 'id':cid})
