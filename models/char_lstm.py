@@ -90,7 +90,7 @@ class CharLstm(nn.Module):
             hid_all = []
             for i in xrange(self.num_rec_layers):
                 if h_prev == None :
-                    out, hid = rec_func[i](p_out)
+                    out, hid = self.rec_layers[i](p_out)
                 else:
                     out, hid = self.rec_layers[i](p_out, (h_prev[0][i:i+1], h_prev[1][i:i+1]))
                 if i > 0:

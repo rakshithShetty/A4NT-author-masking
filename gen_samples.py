@@ -36,7 +36,7 @@ def adv_forward_pass(modelGen, inps, lens, end_c=0, maxlen=100, auths=None,
         rev_char_outs = modelGen.forward_gen(reverse_inp, end_c=end_c, n_max=maxlen, auths=1-auths)
         samples_out = (char_outs, rev_char_outs)
     else:
-        samples_out = (char_outs)
+        samples_out = (char_outs, )
 
     return samples_out
 

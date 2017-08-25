@@ -336,7 +336,7 @@ def main(params):
     eval_every = int(iter_per_epoch * params['eval_interval'])
 
     skip_first = 40
-    iters_eval = 5
+    iters_eval = 1
     iters_gen = 1
 
     #val_score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
@@ -347,7 +347,7 @@ def main(params):
     eval_function = eval_translator if params['mode'] == 'generative' else eval_classify
     leakage = 0.  # params['leakage']
     append_tensor = np.zeros((1, params['batch_size'], params['vocabulary_size'] + 1), dtype=np.float32)
-    append_tensor[:, :, misc['char_to_ix'][misc['startc']] = 1
+    append_tensor[:, :, misc['char_to_ix'][misc['startc']]] = 1
     append_tensor = Variable(torch.FloatTensor(
         append_tensor), requires_grad=False).cuda()
     # Another for the displaying cycle reconstruction
@@ -397,9 +397,9 @@ def main(params):
             # Sample a batch from source author and pass it throught the GAN model
             #---------------------------------------------------------------------
             batch_inpauth = dp.get_sentence_batch(params['batch_size'], split='train',
-                                                  atoms=params['atoms'], aid=misc['ix_to_auth'][c_aid])
+                                                  atoms=params['atoms'], aid=misc['ix_to_auth'][c_aid], sample_by_len = params['sample_by_len'])
             inps, targs, auths, lens = dp.prepare_data(batch_inpauth, misc['char_to_ix'],
-                                                  misc['auth_to_ix'], maxlen=params['max_seq_len'], sample_by_len = params['sample_by_len'])
+                                                  misc['auth_to_ix'], maxlen=params['max_seq_len'])
             # outs are organized as
             outs = adv_forward_pass(modelGen, modelEval, inps, lens,
                                     end_c=misc['char_to_ix'][misc['endc']], backprop_for='eval',
@@ -412,9 +412,9 @@ def main(params):
             # Get a batch of other author samples.
             #---------------------------------------------------------------------
             batch_targauth = dp.get_sentence_batch(params['batch_size'], split='train',
-                                                   atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid])
+                                                   atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid], sample_by_len = params['sample_by_len'])
             gttargInps, gttargtargs, _, gtlens = dp.prepare_data(batch_targauth, misc['char_to_ix'],
-                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'], sample_by_len = params['sample_by_len'])
+                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'])
 
             eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
             #---------------------------------------------------------------------
@@ -507,9 +507,9 @@ def main(params):
         optimGen.zero_grad()
         c_aid = np.random.choice(auth_to_ix.values())
         batch = dp.get_sentence_batch( params['batch_size'], split='train', atoms=params['atoms'],
-                    aid=misc['ix_to_auth'][c_aid])
+                    aid=misc['ix_to_auth'][c_aid], sample_by_len = params['sample_by_len'])
         inps, targs, auths, lens = dp.prepare_data(batch, misc['char_to_ix'], misc['auth_to_ix'],
-                                    maxlen=params['max_seq_len'], sample_by_len = params['sample_by_len'])
+                                    maxlen=params['max_seq_len'])
         outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix'][misc['endc']],
                     maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
                     cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
@@ -519,10 +519,9 @@ def main(params):
         #---------------------------------------------------------------------
         if params['feature_matching'] != None:
             batch_targauth = dp.get_sentence_batch(params['batch_size'], split='train',
-                                                   atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid])
+                                                   atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid], sample_by_len = params['sample_by_len'])
             gttargInps, gttargtargs, gttargauths ,gtlens = dp.prepare_data(batch_targauth, misc['char_to_ix'],
-                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'],
-                                                   sample_by_len = params['sample_by_len'])
+                                                   misc['auth_to_ix'], maxlen=params['max_seq_len'])
 
             eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
 
@@ -636,9 +635,9 @@ def main(params):
             lossEv_diff0 = accum_diff_eval[0]/(accum_count_eval[0]+1e-5) + (accum_count_eval[0]==0) * lossEv_diff0
             lossEv_diff1 = accum_diff_eval[1]/(accum_count_eval[1]+1e-5) + (accum_count_eval[1]==0) * lossEv_diff1
             elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2e} | ms/it {:5.2f} | '
+            print('| epoch {:2.2f} | {:5d}/{:5d} batches | lr {:02.2e} | ms/it {:5.2f} | '
                   'loss - G {:3.2f} - Gc {:3.2f} - Gf {:3.2f} - E {:3.2f} - erra1 {:3.2f} - erra2 {:3.2f} - Ec {:3.2f}|'.format(
-                      i // iter_per_epoch, i, total_iters, params['learning_rate_gen'],
+                      float(i) / iter_per_epoch, i, total_iters, params['learning_rate_gen'],
                       elapsed * 1000 / args.log_interval, lossG, lossGcyc, lossGfeat, lossEv_tot, 100.*err_a1, 100.*err_a2,
                       lossEv_const))
 
