@@ -37,7 +37,7 @@ def main(params):
 
     eval_function = eval_translator if params['m_type']=='translator' else eval_model if cp_params['mode'] == 'generative' else eval_classify
 
-    score = eval_function(dp, model, cp_params, char_to_ix, auth_to_ix, split=params['split'], max_docs = params['num_eval'], dump_scores=False)
+    score = eval_function(dp, model, cp_params, char_to_ix, auth_to_ix, split=params['split'], max_docs = params['num_eval'], dump_scores=params['dump_scores'])
 
 if __name__ == "__main__":
 
@@ -46,6 +46,7 @@ if __name__ == "__main__":
   parser.add_argument('--m_type', dest='m_type', type=str, default='generator', help='checkpoint filename')
   parser.add_argument('-s','--split', dest='split', type=str, default=None, help='which split to evaluate')
   parser.add_argument('--num_eval', dest='num_eval', type=int, default=-1, help='how many doc to evlauate')
+  parser.add_argument('--dump_scores', dest='dump_scores', type=int, default=0, help='how many doc to evlauate')
   parser.add_argument('--topk', dest='topk', type=int, default=5, help='how many doc to evlauate')
 
   args = parser.parse_args()

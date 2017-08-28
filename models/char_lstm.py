@@ -226,6 +226,7 @@ class CharLstm(nn.Module):
 
         rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
 
+        import ipdb; ipdb.set_trace()
         if self.max_pool_rnn:
             enc_out = self.dec_drop(torch.cat([packed_mean(rnn_out,dim=0), hidden[0][0]],
                 dim=-1))

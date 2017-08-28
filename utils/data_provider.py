@@ -8,6 +8,7 @@ import torch
 from torch import tensor
 import numpy as np
 import random
+from bisect import bisect
 
 class DataProvider():
 
@@ -22,9 +23,15 @@ class DataProvider():
         self.athstr = 'author' if params.get('authstring',None) == None else params['authstring']
 
         if len(params.get('filterauths', [])) > 0:
-            keepset = set(params['filterauths'])
-            print 'Keeping only %s'%keepset
-            self.data['docs'] = [doc for doc in self.data['docs'] if doc[self.athstr] in keepset]
+            if params.get('filtertype','keep') == 'keep':
+                keepset = set(params['filterauths'])
+                print 'Keeping only %s'%keepset
+                self.data['docs'] = [doc for doc in self.data['docs'] if doc[self.athstr] in keepset]
+            elif params.get('filtertype','keep') == 'agegroup':
+                groupidces = map(int,params['filterauths'])
+                for i,doc in enumerate(self.data['docs']):
+                    grp = bisect(groupidces, doc['actage'])
+                    self.data['docs'][i][self.athstr] = '<' + str(groupidces[grp])
 
         self.splits = defaultdict(list)
         for i,dc in enumerate(self.data['docs']):
@@ -60,8 +67,12 @@ class DataProvider():
             ix = max(min(len(tkn.split()),self.max_len),self.min_len)
             lenHist[ix] += 1
             self.lenMap[ix].append((iid,sid))
+        self.min_len = min(lenHist.keys())
 
-        self.lenCdist = np.cumsum(lenHist.values())
+        if not params.get('uniform_len_sample',True):
+            self.lenCdist = np.cumsum(lenHist.values())
+        else:
+            self.lenCdist = np.arange(len(lenHist))+1
         return
 
     def set_hid_cache(self, idces, hid_state):
@@ -123,9 +134,9 @@ class DataProvider():
         for i,cid in enumerate(self.splits[split]):
             for j in xrange(self.get_num_sent_doc(cid, atoms=atoms)):
                 inp, targ = sent_func[atoms](cid, sidx=j)
-                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr], 'id':cid})
+                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr], 'id':cid, 'attrib':self.data['docs'][cid]['attrib']})
                 if len(batch) == batch_size:
-                    yield batch, j == (self.get_num_sent_doc(cid,atoms=atoms))
+                    yield batch, j == (self.get_num_sent_doc(cid,atoms=atoms)-1)
                     batch = []
             if batch:
                 yield batch, True
