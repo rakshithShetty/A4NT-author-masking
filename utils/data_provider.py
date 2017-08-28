@@ -69,7 +69,7 @@ class DataProvider():
             self.lenMap[ix].append((iid,sid))
         self.min_len = min(lenHist.keys())
 
-        if not params.get('uniform_len_sample',True):
+        if not params.get('uniform_len_sample',0):
             self.lenCdist = np.cumsum(lenHist.values())
         else:
             self.lenCdist = np.arange(len(lenHist))+1

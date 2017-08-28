@@ -215,10 +215,10 @@ class CharTranslator(nn.Module):
         enc_rnn_out = enc_rnn_out_unp[0]
 
         if self.max_pool_rnn:
-            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][0]],
+            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][-1]],
                 dim=-1)
         else:
-            ctxt = enc_hidden[0][0]
+            ctxt = enc_hidden[0][-1]
 
         if type(sort_enc) != type(None):
             ctxt_sorted = ctxt.index_select(0,sort_enc)
@@ -287,10 +287,10 @@ class CharTranslator(nn.Module):
         enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev=h_prev_enc, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
 
         if self.encoder_mean_vec:
-            ctxt = torch.cat([packed_mean(enc_rnn_out, dim=0), enc_hidden[0][0]],
+            ctxt = torch.cat([packed_mean(enc_rnn_out, dim=0), enc_hidden[0][-1]],
                 dim=-1)
         else:
-            ctxt = enc_hidden[0][0]
+            ctxt = enc_hidden[0][-1]
         return ctxt
 
     def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None, adv_inp=False):
@@ -317,10 +317,10 @@ class CharTranslator(nn.Module):
         enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev=h_prev_enc, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
 
         if self.max_pool_rnn:
-            ctxt = torch.cat([packed_mean(enc_rnn_out, dim=0), enc_hidden[0][0]],
+            ctxt = torch.cat([packed_mean(enc_rnn_out, dim=0), enc_hidden[0][-1]],
                 dim=-1)
         else:
-            ctxt = enc_hidden[0][0]
+            ctxt = enc_hidden[0][-1]
 
         #Append with target author embedding
         if self.pad_auth_vec:
@@ -399,9 +399,9 @@ class CharTranslator(nn.Module):
         enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
 
         if self.max_pool_rnn:
-            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][0]], dim=-1)
+            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][-1]], dim=-1)
         else:
-            ctxt = enc_hidden[0][0]
+            ctxt = enc_hidden[0][-1]
         #Append with target author embedding
         if self.pad_auth_vec:
             ctxt = torch.cat([ctxt,self.auth_emb(Variable(auths).cuda())], dim=-1)

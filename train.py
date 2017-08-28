@@ -52,7 +52,7 @@ def main(params):
         optim = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], momentum = params['decay_rate'])
     else:
         optim = torch.optim.RMSprop([{'params': [p[1] for p in model.named_parameters() if p[0] != 'decoder_W']},
-                {'params':model.decoder_W, 'weight_decay':0.001}],
+                {'params':model.decoder_W, 'weight_decay':0.000}],
                 lr=params['learning_rate'], alpha=params['decay_rate'],
                 eps=params['smooth_eps'])
     # Loss function
@@ -94,7 +94,8 @@ def main(params):
             b_ids = [b['id'] for b in batch]
             hidden = dp.get_hid_cache(b_ids, hidden)
         elif params['use_sentences']:
-            batch = dp.get_sentence_batch(params['batch_size'], split='train', atoms=params['atoms'], sample_by_len = params['sample_by_len'])
+            c_aid = None #ix_to_auth[np.random.choice(auth_to_ix.values())]
+            batch = dp.get_sentence_batch(params['batch_size'], split='train', aid=c_aid, atoms=params['atoms'], sample_by_len = params['sample_by_len'])
             hidden = hidden_zeros
         else:
             batch, reset_h = dp.get_doc_batch(split='train')
@@ -185,10 +186,13 @@ if __name__ == "__main__":
 
   parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
   parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
+  parser.add_argument('--uniform_len_sample', dest='uniform_len_sample', type=int, default=0, help='uniform_len_sample')
 
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
+
+  parser.add_argument('--decoder_mlp', dest='decoder_mlp', type=int, default=0, help='Use Mlp layer to do the classification')
 
   parser.add_argument('--fappend', dest='fappend', type=str, default='baseline', help='append this string to checkpoint filenames')
   parser.add_argument('-o', '--checkpoint_output_directory', dest='checkpoint_output_directory', type=str, default='cv/', help='output directory to write checkpoints to')

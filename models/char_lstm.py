@@ -10,6 +10,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch import tensor
 from model_utils import packed_mean, packed_add
 import torch.nn.functional as FN
+import numpy as np
 
 class CharLstm(nn.Module):
     def __init__(self, params):
@@ -37,9 +38,17 @@ class CharLstm(nn.Module):
 
         # Output decoder layer
         if params.get('mode','generative')=='classifier':
-            self.decoder_W = nn.Parameter(torch.zeros([self.hidden_size*(1+self.max_pool_rnn),
-                self.num_output_layers]), True)
+            decoder_size = self.hidden_size*(1+self.max_pool_rnn)
+            if params.get('decoder_mlp', 0):
+                self.decoder_W_mlp = nn.Parameter(torch.zeros([decoder_size,
+                    params['decoder_mlp']]), True)
+                self.decoder_b_mlp = nn.Parameter(torch.zeros([params['decoder_mlp']]), True)
+                decoder_size = params['decoder_mlp']
+                self.decoder_mlp = True
+
+            self.decoder_W = nn.Parameter(torch.zeros([decoder_size, self.num_output_layers]), True)
             self.decoder_b = nn.Parameter(torch.zeros([self.num_output_layers]), True)
+
             if params.get('generic_classifier',False):
                 self.generic_W = nn.Parameter(torch.zeros([self.hidden_size*(1+self.max_pool_rnn),1]), True)
                 self.generic_b = nn.Parameter(torch.zeros([1]), True)
@@ -60,11 +69,15 @@ class CharLstm(nn.Module):
 
     def init_weights(self):
         # Weight initializations for various parts.
-        a = 0.01
+        a = np.sqrt(float(self.decoder_W.size(0)))
         if hasattr(self,'generic_W'):
             self.generic_W.data.uniform_(-a, a)
             self.generic_b.data.fill_(0.)
-        self.decoder_W.data.uniform_(-a, a)
+        if hasattr(self,'decoder_mlp'):
+            n_in = np.sqrt(float(self.decoder_W_mlp.size(0)))
+            self.decoder_W_mlp.data.uniform_(-1.73/n_in, 1.73/n_in)
+            self.decoder_b_mlp.data.fill_(0.)
+        self.decoder_W.data.uniform_(-1.73/a, 1.73/a)
         #self.encoder.weight.data.uniform_(-a, a)
         self.decoder_b.data.fill_(0)
         h_sz = self.hidden_size
@@ -226,18 +239,21 @@ class CharLstm(nn.Module):
 
         rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
 
-        import ipdb; ipdb.set_trace()
         if self.max_pool_rnn:
-            enc_out = self.dec_drop(torch.cat([packed_mean(rnn_out,dim=0), hidden[0][0]],
+            enc_out = self.dec_drop(torch.cat([packed_mean(rnn_out,dim=0), hidden[0][-1]],
                 dim=-1))
         else:
-            enc_out = self.dec_drop(hidden[0][0])
+            enc_out = self.dec_drop(hidden[0][-1])
 
         W = self.decoder_W
         # reshape and expand b to size (n_auth*n_steps*vocab_size)
         b = self.decoder_b.expand(b_sz, self.num_output_layers)
+        dec_in = enc_out
+        if hasattr(self,'decoder_mlp'):
+            b_dec_mlp = self.decoder_b_mlp.expand(b_sz, self.decoder_b_mlp.size(0))
+            dec_in = FN.tanh(enc_out.mm(self.decoder_W_mlp) + b_dec_mlp)
 
-        dec_out = enc_out.mm(W) + b
+        dec_out = dec_in.mm(W) + b
         if compute_softmax:
             prob_out = self.softmax(dec_out.contiguous().view(-1, self.num_output_layers))
         else:
