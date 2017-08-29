@@ -692,9 +692,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--authstring', dest='authstring', type=str, default='author', help='which label to use as author')
     parser.add_argument('--filterauths', dest='filterauths', nargs='+', type=str, default=[], help='which author classes to keep')
+    parser.add_argument('--filtertype', dest='filtertype', type=str, default='keep', help='which author classes to keep')
 
     parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
     parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
+    parser.add_argument('--uniform_len_sample', dest='uniform_len_sample', type=int, default=0, help='uniform_len_sample')
 
     # mode
     parser.add_argument('--mode', dest='mode', type=str,
