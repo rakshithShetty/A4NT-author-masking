@@ -282,7 +282,6 @@ def main(params):
     eval_criterion = nn.CrossEntropyLoss()
     # Do size averaging here so that classes are balanced
     bceLogitloss = nn.BCEWithLogitsLoss(size_average=True)
-    bceLogitloss_gen = nn.BCEWithLogitsLoss(size_average=False)
     eval_generic = nn.BCELoss(size_average=True)
     cycle_loss_func = nn.CrossEntropyLoss() if params['cycle_loss_type'] == 'ml' else nn.L1Loss()
     featmatch_l2_loss = nn.L1Loss()
@@ -519,8 +518,8 @@ def main(params):
 
         if params['weigh_difficult'] > 0.:
             eval_out_inp, _ = modelEval.forward_classify(targs, lens=lens)
-            sample_weight = (-FN.log_softmax(eval_out_inp)[:,1-c_aid])
-            sample_weight = (sample_weight/sample_weight.sum()).detach()
+            sample_weight = (-FN.log_softmax(eval_out_inp)[:,1-c_aid]).detach()
+            #sample_weight = (sample_weight/sample_weight.sum()).detach()
         #---------------------------------------------------------------------
         # Get a batch of other author samples. This is for feature mathcing loss
         #---------------------------------------------------------------------
@@ -594,9 +593,9 @@ def main(params):
             targ_aid = 1 - c_aid
             gen_aid_out = outs[0][:, targ_aid]
             if params['weigh_difficult'] > 0.:
-                loss_aid = (bceLogitloss_gen(gen_aid_out, ones[:gen_aid_out.size(0)])*sample_weight).sum()
+                loss_aid = FN.binary_cross_entropy_with_logits(gen_aid_out, ones[:gen_aid_out.size(0)],sample_weight, size_average=True)
             else:
-                loss_aid = (bceLogitloss_gen(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
+                loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
             lossGen = 5.*loss_aid
         elif params['wasserstien_loss']:
             targ_aid = 1 - c_aid
