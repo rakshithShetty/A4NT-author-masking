@@ -30,7 +30,7 @@ def main(params):
     else:
         model = CharLstm(cp_params)
     # set to train mode, this activates dropout
-    #model.test()
+    model.eval()
 
     # Restore saved checkpoint
     model.load_state_dict(saved_model['state_dict'])

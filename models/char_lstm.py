@@ -264,4 +264,4 @@ class CharLstm(nn.Module):
             generic_class = FN.sigmoid(generic_score)
             return prob_out, hidden, generic_class
         else:
-            return prob_out, hidden
+            return prob_out, enc_out

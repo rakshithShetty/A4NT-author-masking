@@ -526,8 +526,8 @@ def main(params):
             eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
 
             #import ipdb; ipdb.set_trace()
-            feature_match_loss = params['feature_matching'] * featmatch_l2_loss(outs[1][0][0].mean(dim=0),
-                    eval_out_gt[1][0][0].mean(dim=0).detach())
+            feature_match_loss = params['feature_matching'] * featmatch_l2_loss(outs[1].mean(dim=0),
+                    eval_out_gt[1].mean(dim=0).detach())
 
             if params['ml_update']:
                 ml_output, _ = modelGen.forward_mltrain(gttargInps, gtlens, gttargInps, gtlens, auths=gttargauths)
@@ -582,7 +582,7 @@ def main(params):
             targ_aid = 1 - c_aid
             gen_aid_out = outs[0][:, targ_aid]
             loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)]))
-            lossGen = loss_aid
+            lossGen = 5.*loss_aid
         elif params['wasserstien_loss']:
             targ_aid = 1 - c_aid
             gen_aid_out = outs[0][:, targ_aid]
@@ -676,7 +676,7 @@ def main(params):
                     'optimizerGen': optimGen.state_dict(),
                     'optimizerEval': optimEval.state_dict(),
                 }, fappend=params['fappend'],
-                    outdir=params['checkpoint_output_directory'], epoch = 5.0*(i // (5.0*iter_per_epoch)))
+                    outdir=params['checkpoint_output_directory'], epoch = 1.0*(i // (1.0*iter_per_epoch)))
                 best_val = val_rank
             start_time = time.time()
     #pr.disable()

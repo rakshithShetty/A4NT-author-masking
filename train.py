@@ -56,7 +56,10 @@ def main(params):
                 lr=params['learning_rate'], alpha=params['decay_rate'],
                 eps=params['smooth_eps'])
     # Loss function
-    criterion = nn.CrossEntropyLoss()
+    if len(params['balance_loss']) == 0:
+        criterion = nn.CrossEntropyLoss()
+    else:
+        criterion = nn.CrossEntropyLoss(torch.FloatTensor(params['balance_loss']).cuda())
 
     # Restore saved checkpoint
     if params['resume'] !=None:
@@ -119,7 +122,7 @@ def main(params):
             loss = criterion(pack_padded_sequence(output,lens)[0], targets[0])
         else:
             # for classifier auths is the target
-            output, hidden = model.forward_classify(targs, hidden, compute_softmax=False, lens=lens)
+            output, _ = model.forward_classify(targs, hidden, compute_softmax=False, lens=lens)
             targets = Variable(auths).cuda()
             loss = criterion(output, targets)
         loss.backward()
@@ -187,6 +190,9 @@ if __name__ == "__main__":
   parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
   parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
   parser.add_argument('--uniform_len_sample', dest='uniform_len_sample', type=int, default=0, help='uniform_len_sample')
+
+
+  parser.add_argument('--balance_loss', dest='balance_loss', nargs='+', type=float, default=[], help='weigths for each class in loss function')
 
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
