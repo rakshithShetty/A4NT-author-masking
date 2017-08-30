@@ -9,6 +9,7 @@ from collections import defaultdict
 from utils.data_provider import DataProvider
 from utils.utils import repackage_hidden, eval_translator, eval_classify
 from torch.autograd import Variable, Function
+import torch.nn.functional as FN
 
 import torch
 import torch.nn as nn
@@ -281,6 +282,7 @@ def main(params):
     eval_criterion = nn.CrossEntropyLoss()
     # Do size averaging here so that classes are balanced
     bceLogitloss = nn.BCEWithLogitsLoss(size_average=True)
+    bceLogitloss_gen = nn.BCEWithLogitsLoss(size_average=False)
     eval_generic = nn.BCELoss(size_average=True)
     cycle_loss_func = nn.CrossEntropyLoss() if params['cycle_loss_type'] == 'ml' else nn.L1Loss()
     featmatch_l2_loss = nn.L1Loss()
@@ -514,6 +516,11 @@ def main(params):
                     maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
                     cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
                     GradFilterLayer = GradFilterLayer, cycle_loss_type = params['cycle_loss_type'])
+
+        if params['weigh_difficult'] > 0.:
+            eval_out_inp, _ = modelEval.forward_classify(targs, lens=lens)
+            sample_weight = (-FN.log_softmax(eval_out_inp)[:,1-c_aid])
+            sample_weight = (sample_weight/sample_weight.sum()).detach()
         #---------------------------------------------------------------------
         # Get a batch of other author samples. This is for feature mathcing loss
         #---------------------------------------------------------------------
@@ -525,9 +532,14 @@ def main(params):
 
             eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
 
+            if params['weigh_feat_match']:
+                feat_match_weight = (-FN.log_softmax(eval_out_gt[0])[:,1-c_aid])
+                feat_match_weight = feat_match_weight / feat_match_weight.sum()
+
+            targ_mean_vec = eval_out_gt[1].mean(dim=0).detach() if params['weigh_feat_match'] else (eval_out_gt[1]*feat_match_weight[:,None]).sum(dim=0).detach()
             #import ipdb; ipdb.set_trace()
             feature_match_loss = params['feature_matching'] * featmatch_l2_loss(outs[1].mean(dim=0),
-                    eval_out_gt[1].mean(dim=0).detach())
+                    targ_mean_vec)
 
             if params['ml_update']:
                 ml_output, _ = modelGen.forward_mltrain(gttargInps, gtlens, gttargInps, gtlens, auths=gttargauths)
@@ -581,7 +593,10 @@ def main(params):
         elif not params['wasserstien_loss']:
             targ_aid = 1 - c_aid
             gen_aid_out = outs[0][:, targ_aid]
-            loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)]))
+            if params['weigh_difficult'] > 0.:
+                loss_aid = (bceLogitloss_gen(gen_aid_out, ones[:gen_aid_out.size(0)])*sample_weight).sum()
+            else:
+                loss_aid = (bceLogitloss_gen(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
             lossGen = 5.*loss_aid
         elif params['wasserstien_loss']:
             targ_aid = 1 - c_aid
@@ -697,6 +712,9 @@ if __name__ == "__main__":
     parser.add_argument('--use_unk', dest='use_unk', type=int, default=0, help='Use UNK for out of vocabulary words')
     parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
     parser.add_argument('--uniform_len_sample', dest='uniform_len_sample', type=int, default=0, help='uniform_len_sample')
+
+    parser.add_argument('--weigh_difficult', dest='weigh_difficult', type=float, default=.0, help='')
+    parser.add_argument('--weigh_feat_match', dest='weigh_feat_match', type=float, default=.0, help='')
 
     # mode
     parser.add_argument('--mode', dest='mode', type=str,
