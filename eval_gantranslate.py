@@ -102,6 +102,9 @@ def main(params):
     dp = DataProvider(cp_params)
     modelGen = CharTranslator(cp_params)
     modelEval = CharLstm(eval_params)
+    
+    startc = dp.data['configs']['start']
+    endc = dp.data['configs']['end']
 
     modelGen.eval()
     modelEval.eval()
@@ -113,7 +116,7 @@ def main(params):
     modelEval.load_state_dict(state)
 
     append_tensor = np.zeros((1, 1), dtype=np.int)
-    append_tensor[0, 0] = char_to_ix['2']
+    append_tensor[0, 0] = char_to_ix[startc]
     append_tensor = torch.LongTensor(append_tensor).cuda()
 
     accum_diff_eval = [[],[]]
@@ -140,7 +143,7 @@ def main(params):
         # outs are organized as
         auths_inp = 1 - auths if params['flip'] else auths
         outs = adv_forward_pass(modelGen, modelEval, inps, lens,
-                end_c=char_to_ix['.'], maxlen=cp_params['max_seq_len'],
+                end_c=char_to_ix[endc], maxlen=cp_params['max_seq_len'],
                 auths=auths_inp, cycle_compute=params['show_rev'],
                 append_symb=append_tensor)
 
