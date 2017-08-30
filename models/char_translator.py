@@ -21,16 +21,16 @@ def sample_gumbel(x):
 
 def gumbel_softmax_sample(x, tau=0.2, hard=False):
     noise = sample_gumbel(x)
-    y = (x + noise) / tau
-    y = FN.softmax(y)
+    y = (FN.log_softmax(x) + noise) / tau
+    ysft = FN.softmax(y)
     if hard:
-        max_v, max_idx = y.max(dim=1,keepdim=True)
-        one_hot = Variable(y.data.new(y.size()).zero_().scatter_(1, max_idx.data, y.data.new(max_idx.size()).fill_(1.)) - y.data, requires_grad=False)
+        max_v, max_idx = ysft.max(dim=1,keepdim=True)
+        one_hot = Variable(ysft.data.new(ysft.size()).zero_().scatter_(1, max_idx.data, ysft.data.new(max_idx.size()).fill_(1.)) - ysft.data, requires_grad=False)
         # Which is the right way to do this?
         #y_out = one_hot.detach() + y
-        y_out = one_hot + y
+        y_out = one_hot + ysft
         return y_out.view_as(x)
-    return y.view_as(x)
+    return ysft.view_as(x)
 
 class CharTranslator(nn.Module):
     def __init__(self, params, encoder_only=False):
