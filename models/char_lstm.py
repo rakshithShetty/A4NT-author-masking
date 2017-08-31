@@ -30,7 +30,8 @@ class CharLstm(nn.Module):
 
         # Lstm Layers
         if self.en_residual:
-            self.rec_layers = nn.ModuleList([nn.LSTM(self.emb_size, self.hidden_size, 1) for i in xrange(self.num_rec_layers)])
+            inp_sizes = [self.emb_size] + [self.hidden_size]*(self.num_rec_layers-1)
+            self.rec_layers = nn.ModuleList([nn.LSTM(inp_sizes[i], self.hidden_size, 1) for i in xrange(self.num_rec_layers)])
         else:
             self.rec_layers = nn.LSTM(self.emb_size, self.hidden_size, self.num_rec_layers)
 
@@ -45,6 +46,12 @@ class CharLstm(nn.Module):
                 self.decoder_b_mlp = nn.Parameter(torch.zeros([params['decoder_mlp']]), True)
                 decoder_size = params['decoder_mlp']
                 self.decoder_mlp = True
+            elif params.get('decoder_cnn',0):
+                self.cnn_ks = params['decoder_cnn_ks']
+                self.cnn_nfilt = params['decoder_cnn_nfilt']
+                self.decoder_cnn = nn.ModuleList([nn.Conv1d(self.hidden_size,self.cnn_nfilt, K,padding=K) for K in self.cnn_ks])
+                self.decoder_cnnlayer = True
+                decoder_size = self.cnn_nfilt*len(self.cnn_ks)
 
             self.decoder_W = nn.Parameter(torch.zeros([decoder_size, self.num_output_layers]), True)
             self.decoder_b = nn.Parameter(torch.zeros([self.num_output_layers]), True)
@@ -239,19 +246,28 @@ class CharLstm(nn.Module):
 
         rnn_out, hidden = self._my_recurrent_layer(packed, h_prev)
 
-        if self.max_pool_rnn:
-            enc_out = self.dec_drop(torch.cat([packed_mean(rnn_out,dim=0), hidden[0][-1]],
-                dim=-1))
-        else:
-            enc_out = self.dec_drop(hidden[0][-1])
+
+        if not hasattr(self, 'decoder_cnnlayer'):
+            if self.max_pool_rnn:
+                enc_out = self.dec_drop(torch.cat([packed_mean(rnn_out,dim=0), hidden[0][-1]],
+                    dim=-1))
+            else:
+                enc_out = self.dec_drop(hidden[0][-1])
+            dec_in = enc_out
 
         W = self.decoder_W
         # reshape and expand b to size (n_auth*n_steps*vocab_size)
         b = self.decoder_b.expand(b_sz, self.num_output_layers)
-        dec_in = enc_out
         if hasattr(self,'decoder_mlp'):
             b_dec_mlp = self.decoder_b_mlp.expand(b_sz, self.decoder_b_mlp.size(0))
             dec_in = FN.tanh(enc_out.mm(self.decoder_W_mlp) + b_dec_mlp)
+        elif hasattr(self, 'decoder_cnnlayer'):
+            rnn_unpacked,_ = pad_packed_sequence(rnn_out)
+            rnn_unpacked = rnn_unpacked.permute(1,2,0)
+            cnn_out = [FN.leaky_relu(conv(rnn_unpacked)) for conv in self.decoder_cnn]
+            cnn_pool_out = [FN.max_pool1d(cn, cn.size(2)).squeeze(2) for cn in cnn_out]
+            dec_in = torch.cat(cnn_pool_out, dim=1)
+            enc_out = dec_in
 
         dec_out = dec_in.mm(W) + b
         if compute_softmax:

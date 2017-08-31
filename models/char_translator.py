@@ -72,7 +72,8 @@ class CharTranslator(nn.Module):
 
         # Encoder Lstm Layers
         if self.en_residual:
-            self.enc_rec_layers = nn.ModuleList([nn.LSTM(self.emb_size, self.enc_hidden_size, 1) for i in xrange(self.enc_num_rec_layers)])
+            inp_sizes = [self.emb_size] + [self.enc_hidden_size]*(self.enc_num_rec_layers-1)
+            self.enc_rec_layers = nn.ModuleList([nn.LSTM(inp_sizes[i], self.enc_hidden_size, 1) for i in xrange(self.enc_num_rec_layers)])
         else:
             self.enc_rec_layers = nn.LSTM(self.emb_size, self.enc_hidden_size, self.enc_num_rec_layers)
 
