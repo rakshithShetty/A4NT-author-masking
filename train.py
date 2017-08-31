@@ -3,7 +3,7 @@ import json
 import time
 import numpy as np
 import os
-from models.char_lstm import CharLstm
+from models.model_utils import get_classifier
 from collections import defaultdict
 from utils.data_provider import DataProvider
 from utils.utils import repackage_hidden, eval_model, eval_classify
@@ -43,7 +43,7 @@ def main(params):
     params['num_output_layers'] = len(auth_to_ix)
     print params['vocabulary_size'], params['num_output_layers']
 
-    model = CharLstm(params)
+    model = get_classifier(params)
     # set to train mode, this activates dropout
     model.train()
     #Initialize the RMSprop optimizer
@@ -182,7 +182,6 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('-d', '--dataset', dest='dataset',  type=str, default='pan16AuthorMask', help='dataset: pan')
   parser.add_argument('--datasetfile', dest='dataset_file', type=str, default='dataset.json', help='dataset file')
-  # mode
   parser.add_argument('--authstring', dest='authstring', type=str, default='author', help='which label to use as author')
   parser.add_argument('--filterauths', dest='filterauths', nargs='+', type=str, default=[], help='which author classes to keep')
   parser.add_argument('--filtertype', dest='filtertype', type=str, default='keep', help='which author classes to keep')
@@ -191,9 +190,10 @@ if __name__ == "__main__":
   parser.add_argument('--sample_by_len', dest='sample_by_len', type=int, default=1, help='Use UNK for out of vocabulary words')
   parser.add_argument('--uniform_len_sample', dest='uniform_len_sample', type=int, default=0, help='uniform_len_sample')
 
-
   parser.add_argument('--balance_loss', dest='balance_loss', nargs='+', type=float, default=[], help='weigths for each class in loss function')
 
+  # mode
+  parser.add_argument('--modeltype', dest='modeltype', type=str, default='lstm', help='Use LSTM based or CNN based model')
   parser.add_argument('--mode', dest='mode', type=str, default='generative', help='print every x iters')
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
@@ -202,6 +202,7 @@ if __name__ == "__main__":
   parser.add_argument('--decoder_cnn', dest='decoder_cnn', type=int, default=0, help='Use CNN layer to do the classification')
   parser.add_argument('--decoder_cnn_nfilt', dest='decoder_cnn_nfilt', type=int, default=100, help='Use Mlp layer to do the classification')
   parser.add_argument('--decoder_cnn_ks', dest='decoder_cnn_ks', nargs='+',type=int, default=[2,3,4], help='Use Mlp layer to do the classification')
+  parser.add_argument('--no_encoder', dest='no_encoder' ,type=int, default=0, help='Use Mlp layer to do the classification')
 
   parser.add_argument('--fappend', dest='fappend', type=str, default='baseline', help='append this string to checkpoint filenames')
   parser.add_argument('-o', '--checkpoint_output_directory', dest='checkpoint_output_directory', type=str, default='cv/', help='output directory to write checkpoints to')
@@ -231,7 +232,6 @@ if __name__ == "__main__":
   parser.add_argument('--leakage', dest='leakage', type=float, default=0., help='Leakage rate initially')
   parser.add_argument('--leakage_decay', dest='leakage_decay', type=float, default=0.95, help='Leakage decay rate')
   parser.add_argument('--leakage_min', dest='leakage_min', type=float, default=1e-5, help='Minimum leakage rate')
-
 
   # Validation args
   parser.add_argument('--eval_interval', dest='eval_interval', type=float, default=0.5, help='print every x iters')

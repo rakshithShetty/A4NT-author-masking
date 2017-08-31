@@ -2,6 +2,14 @@ import torch
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.autograd import Variable
 
+def get_classifier(params):
+    from char_lstm import CharLstm
+    from char_cnn import CharCNN
+
+    if params['modeltype'] == 'lstm':
+        return CharLstm(params)
+    else:
+        return CharCNN(params)
 
 def packed_mean(packed, dim=0):
     unp = pad_packed_sequence(packed)

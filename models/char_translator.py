@@ -1,9 +1,4 @@
 import torch
-import torchvision.models
-import torch.utils.data
-import torchvision.datasets as datasets
-import torchvision.transforms as transforms
-import torchvision.models as models
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence

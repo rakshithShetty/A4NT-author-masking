@@ -1,9 +1,4 @@
 import torch
-import torchvision.models
-import torch.utils.data
-import torchvision.datasets as datasets
-import torchvision.transforms as transforms
-import torchvision.models as models
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -266,7 +261,7 @@ class CharLstm(nn.Module):
             rnn_unpacked = rnn_unpacked.permute(1,2,0)
             cnn_out = [FN.leaky_relu(conv(rnn_unpacked)) for conv in self.decoder_cnn]
             cnn_pool_out = [FN.max_pool1d(cn, cn.size(2)).squeeze(2) for cn in cnn_out]
-            dec_in = torch.cat(cnn_pool_out, dim=1)
+            dec_in = self.dec_drop(torch.cat(cnn_pool_out, dim=1))
             enc_out = dec_in
 
         dec_out = dec_in.mm(W) + b
