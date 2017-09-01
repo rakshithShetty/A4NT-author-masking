@@ -114,10 +114,10 @@ def main(params):
         print '--------------------------------------------'
         #print 'Translate from %s to %s'%(batch[0]['author'], ix_to_auth[auths_inp[0]])
         print colored('Inp %s: '%(ix_to_auth[auths[0]]),'green') + colored('%s'%(jc.join([ix_to_char[c[0]] for c in inps[1:]])),auth_colors[auths[0]])
-        print colored('Out %s: '%(ix_to_auth[auths_inp[0]]),'grey')+ colored('%s'%(jc.join([ix_to_char[c.data.cpu()[0]] for c in outs[0]])),auth_colors[auths_inp[0]])
+        print colored('Out %s: '%(ix_to_auth[auths_inp[0]]),'grey')+ colored('%s'%(jc.join([ix_to_char[c.data.cpu()[0]] for c in outs[0] if c.data.cpu()[0] in ix_to_char])),auth_colors[auths_inp[0]])
 
         if params['show_rev']:
-            print colored('Rev %s: '%(ix_to_auth[auths[0]]),'green')+ colored('%s'%(jc.join([ix_to_char[c.data.cpu()[0]] for c in outs[-1]])),auth_colors[auths[0]])
+            print colored('Rev %s: '%(ix_to_auth[auths[0]]),'green')+ colored('%s'%(jc.join([ix_to_char[c.data.cpu()[0]] for c in outs[-1] if c.data.cpu()[0] in ix_to_char])),auth_colors[auths[0]])
 
 
 
