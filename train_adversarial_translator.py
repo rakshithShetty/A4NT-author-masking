@@ -337,8 +337,8 @@ def main(params):
     eval_every = int(iter_per_epoch * params['eval_interval'])
 
     skip_first = 40
-    iters_eval = 1
-    iters_gen = 1
+    iters_eval = 5
+    iters_gen = 5
 
     #val_score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
     # eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
@@ -511,18 +511,8 @@ def main(params):
                     aid=misc['ix_to_auth'][c_aid], sample_by_len = params['sample_by_len'])
         inps, targs, auths, lens = dp.prepare_data(batch, misc['char_to_ix'], misc['auth_to_ix'],
                                     maxlen=params['max_seq_len'])
-        outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix'][misc['endc']],
-                    maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
-                    cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
-                    GradFilterLayer = GradFilterLayer, cycle_loss_type = params['cycle_loss_type'])
 
-        if params['weigh_difficult'] > 0.:
-            eval_out_inp, _ = modelEval.forward_classify(targs, lens=lens)
-            sample_weight = (-FN.log_softmax(eval_out_inp)[:,1-c_aid]).detach()
-            #sample_weight = (sample_weight/sample_weight.sum()).detach()
-        #---------------------------------------------------------------------
-        # Get a batch of other author samples. This is for feature mathcing loss
-        #---------------------------------------------------------------------
+        # This needs to be done only once
         if params['feature_matching'] != None:
             batch_targauth = dp.get_sentence_batch(params['batch_size'], split='train',
                                                    atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid], sample_by_len = params['sample_by_len'])
@@ -535,91 +525,104 @@ def main(params):
                 feat_match_weight = (-FN.log_softmax(eval_out_gt[0])[:,1-c_aid])
                 feat_match_weight = feat_match_weight / feat_match_weight.sum()
 
-            targ_mean_vec = eval_out_gt[1].mean(dim=0).detach() if params['weigh_feat_match'] else (eval_out_gt[1]*feat_match_weight[:,None]).sum(dim=0).detach()
-            #import ipdb; ipdb.set_trace()
-            feature_match_loss = params['feature_matching'] * featmatch_l2_loss(outs[1].mean(dim=0),
-                    targ_mean_vec)
+            targ_mean_vec = eval_out_gt[1].mean(dim=0).detach() if params['weigh_feat_match']==0. else (eval_out_gt[1]*feat_match_weight[:,None]).sum(dim=0).detach()
 
             if params['ml_update']:
                 ml_output, _ = modelGen.forward_mltrain(gttargInps, gtlens, gttargInps, gtlens, auths=gttargauths)
                 mlTarg = pack_padded_sequence(Variable(gttargtargs).cuda(), gtlens)
                 mlLoss = params['ml_update']*ml_criterion(pack_padded_sequence(ml_output,gtlens)[0], mlTarg[0])
+                mlLoss.backward(retain_graph=True)
             else:
                 mlLoss = 0.
-        else:
-            feature_match_loss = 0.
-            mlLoss = 0.
 
-        #---------------------------------------------------------------------
-        targets = Variable(auths).cuda()
-        if params['cycle_loss_type'] == 'bow':
-            # Does this make any sense!!?
-            cyc_targ = Variable(torch.cuda.FloatTensor(params['batch_size'],
-                                                       params['vocabulary_size'] + 1).zero_().scatter_add_(1, targs.transpose(0, 1).cuda(),
-                                                                                                           torch.ones(targs.size()[::-1]).cuda()).index_fill_(1, torch.cuda.LongTensor([0]), 0), requires_grad=False)
-            # cyc_targ.index_fill_(1,torch.cuda.LongTensor([0]),0)
-            cyc_loss = params['cycle_loss_w'] * cycle_loss_func(outs[-3].sum(dim=0), cyc_targ)
-            rev_char_outs = outs[-1]; rev_gen_lens = outs[-2]
-            char_outs = outs[4]; gen_lens = outs[3]
-        elif params['cycle_loss_type'] == 'enc':
-            # Compute encodings for the groundtruth!
-            enc_inp_gt = modelGenEncoder.forward_encode(inps, lens)
-            #-----------------------------------------------------------------------------------------------------------
-            # Compute encodings for the generated reverse sample!
-            #-----------------------------------------------------------------------------------------------------------
-            gen_lens, char_outs, gen_samples, rev_gen_lens, rev_char_outs = outs[3], outs[4], outs[-3], outs[-2], outs[-1]
-            len_sorted, gen_lensort_idx = rev_gen_lens.sort(dim=0, descending=True)
-            _, rev_sort_idx = gen_lensort_idx.sort(dim=0)
-            rev_sort_idx = Variable(rev_sort_idx, requires_grad=False)
-            gen_samples_srt = gen_samples.index_select(1, Variable(gen_lensort_idx, requires_grad=False))
-            enc_inp = torch.cat([append_tensor, gen_samples_srt])
-            #reverse_inp = reverse_inp.detach()
-            rev_enc = modelGenEncoder.forward_encode(enc_inp, len_sorted.tolist(), adv_inp=True)
-            rev_enc_orig_order = rev_enc.index_select(0, rev_sort_idx)
-            #-----------------------------------------------------------------------------------------------------------
-            cyc_loss = params['cycle_loss_w'] * cycle_loss_func(rev_enc_orig_order, enc_inp_gt.detach())
-        elif params['cycle_loss_type'] == 'ml':
-            rev_ml = outs[-1]
-            rev_mlTarg = pack_padded_sequence(Variable(targs).cuda(), lens)
-            cyc_loss = params['cycle_loss_w']*ml_criterion(pack_padded_sequence(rev_ml,lens)[0], rev_mlTarg[0])
-        else:
-            cyc_loss = 0.
-        #print '\n%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
-        ##print '%d Rev : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c[0]] for c in rev_char_outs[:rev_gen_lens[0]]]))
-        #print '%d Out : %s --> %s' % (0, misc['ix_to_auth'][1-auths[0]], ' '.join([ix_to_char[c[0]] for c in char_outs[:gen_lens[0]]]))
-        if 0:
-            lossGen = eval_criterion(outs[0], ((-1 * targets) + 1)) + cyc_loss
-        elif not params['wasserstien_loss']:
-            targ_aid = 1 - c_aid
-            gen_aid_out = outs[0][:, targ_aid]
-            if params['weigh_difficult'] > 0.:
-                loss_aid = FN.binary_cross_entropy_with_logits(gen_aid_out, ones[:gen_aid_out.size(0)],sample_weight, size_average=True)
+        if params['weigh_difficult'] > 0.:
+            eval_out_inp, _ = modelEval.forward_classify(targs, lens=lens)
+            sample_weight = (-FN.log_softmax(eval_out_inp)[:,1-c_aid]).detach()
+            #sample_weight = (sample_weight/sample_weight.sum()).detach()
+
+
+        for gi in xrange(iters_gen):
+            #import ipdb; ipdb.set_trace()
+            outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix'][misc['endc']],
+                        maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
+                        cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
+                        GradFilterLayer = GradFilterLayer, cycle_loss_type = params['cycle_loss_type'])
+
+            #---------------------------------------------------------------------
+            # Get a batch of other author samples. This is for feature mathcing loss
+            #---------------------------------------------------------------------
+            if params['feature_matching'] != None:
+                feature_match_loss = params['feature_matching'] * featmatch_l2_loss(outs[1].mean(dim=0),
+                        targ_mean_vec)
             else:
-                loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
-            lossGen = 5.*loss_aid
-        elif params['wasserstien_loss']:
-            targ_aid = 1 - c_aid
-            gen_aid_out = outs[0][:, targ_aid]
-            E_gen = gen_aid_out.mean()
-            lossGen = -E_gen
+                feature_match_loss = 0.
+                mlLoss = 0.
 
-        accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean() + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
-        accum_count_gen[targ_aid] += 1.
-        lossGenTot = mlLoss + lossGen + cyc_loss + feature_match_loss
-        #lossGenTot = cyc_loss# +mlLoss #+ lossGen + cyc_loss + feature_match_loss
+            #---------------------------------------------------------------------
+            targets = Variable(auths).cuda()
+            if params['cycle_loss_type'] == 'bow':
+                # Does this make any sense!!?
+                cyc_targ = Variable(torch.cuda.FloatTensor(params['batch_size'],
+                                                           params['vocabulary_size'] + 1).zero_().scatter_add_(1, targs.transpose(0, 1).cuda(),
+                                                                                                               torch.ones(targs.size()[::-1]).cuda()).index_fill_(1, torch.cuda.LongTensor([0]), 0), requires_grad=False)
+                # cyc_targ.index_fill_(1,torch.cuda.LongTensor([0]),0)
+                cyc_loss = params['cycle_loss_w'] * cycle_loss_func(outs[-3].sum(dim=0), cyc_targ)
+                rev_char_outs = outs[-1]; rev_gen_lens = outs[-2]
+                char_outs = outs[4]; gen_lens = outs[3]
+            elif params['cycle_loss_type'] == 'enc':
+                # Compute encodings for the groundtruth!
+                enc_inp_gt = modelGenEncoder.forward_encode(inps, lens)
+                #-----------------------------------------------------------------------------------------------------------
+                # Compute encodings for the generated reverse sample!
+                #-----------------------------------------------------------------------------------------------------------
+                gen_lens, char_outs, gen_samples, rev_gen_lens, rev_char_outs = outs[3], outs[4], outs[-3], outs[-2], outs[-1]
+                len_sorted, gen_lensort_idx = rev_gen_lens.sort(dim=0, descending=True)
+                _, rev_sort_idx = gen_lensort_idx.sort(dim=0)
+                rev_sort_idx = Variable(rev_sort_idx, requires_grad=False)
+                gen_samples_srt = gen_samples.index_select(1, Variable(gen_lensort_idx, requires_grad=False))
+                enc_inp = torch.cat([append_tensor, gen_samples_srt])
+                #reverse_inp = reverse_inp.detach()
+                rev_enc = modelGenEncoder.forward_encode(enc_inp, len_sorted.tolist(), adv_inp=True)
+                rev_enc_orig_order = rev_enc.index_select(0, rev_sort_idx)
+                #-----------------------------------------------------------------------------------------------------------
+                cyc_loss = params['cycle_loss_w'] * cycle_loss_func(rev_enc_orig_order, enc_inp_gt.detach())
+            elif params['cycle_loss_type'] == 'ml':
+                rev_ml = outs[-1]
+                rev_mlTarg = pack_padded_sequence(Variable(targs).cuda(), lens)
+                cyc_loss = params['cycle_loss_w']*ml_criterion(pack_padded_sequence(rev_ml,lens)[0], rev_mlTarg[0])
+            else:
+                cyc_loss = 0.
+            #print '\n%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
+            ##print '%d Rev : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c[0]] for c in rev_char_outs[:rev_gen_lens[0]]]))
+            #print '%d Out : %s --> %s' % (0, misc['ix_to_auth'][1-auths[0]], ' '.join([ix_to_char[c[0]] for c in char_outs[:gen_lens[0]]]))
+            if 0:
+                lossGen = eval_criterion(outs[0], ((-1 * targets) + 1)) + cyc_loss
+            elif not params['wasserstien_loss']:
+                targ_aid = 1 - c_aid
+                gen_aid_out = outs[0][:, targ_aid]
+                if params['weigh_difficult'] > 0.:
+                    loss_aid = FN.binary_cross_entropy_with_logits(gen_aid_out, ones[:gen_aid_out.size(0)],sample_weight, size_average=True)
+                else:
+                    loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
+                lossGen = 5.*loss_aid
+            elif params['wasserstien_loss']:
+                targ_aid = 1 - c_aid
+                gen_aid_out = outs[0][:, targ_aid]
+                E_gen = gen_aid_out.mean()
+                lossGen = -E_gen
+
+            accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean() + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
+            accum_count_gen[targ_aid] += 1.
+            lossGenTot = lossGen + cyc_loss + feature_match_loss
+            #lossGenTot = cyc_loss# +mlLoss #+ lossGen + cyc_loss + feature_match_loss
+            lossGenTot.backward()
+
         #g = make_dot(lossGenTot,{n:p for n,p in modelGen.named_parameters()})
         #import ipdb; ipdb.set_trace()
 
-
-        #if params['generic_classifier']:
-        #    lossGenericGenerator = eval_generic(outs[1], ones)
-        #    lossGen += lossGenericGenerator
-        #    #lossGen = 1*lossGenericGenerator
         # TODO
-        lossGenTot.backward()
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(
-            modelGen.parameters(), params['grad_clip'])
+        torch.nn.utils.clip_grad_norm(modelGen.parameters(), params['grad_clip'])
         # Take an optimization step
         optimGen.step()
         avgL_gen += lossGenTot.data.cpu().numpy()[0]
