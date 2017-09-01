@@ -105,9 +105,9 @@ def disp_gen_samples(modelGen, modelEval, dp, misc, maxlen=100, n_disp=5, atoms=
     print '----------------------Visualising Some Generated Samples-----------------------------------------\n'
     for i in xrange(len(lens)):
         print '%d Inp : %s --> %s' % (i, misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c] for c in inps.numpy()[1:, i] if c in ix_to_char]))
-        print '  Out : %s --> %s' % (misc['ix_to_auth'][1-auths[i]], jc.join([ix_to_char[c[i]] for c in char_outs[:gen_lens[i]]]))
+        print '  Out : %s --> %s' % (misc['ix_to_auth'][1-auths[i]], jc.join([ix_to_char[c[i]] for c in char_outs[:gen_lens[i]] if c[i] in ix_to_char]))
         #print '%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
-        print '  Rev : %s --> %s\n' % (misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c[i]] for c in rev_char_outs[:rev_lens[i]]]))
+        print '  Rev : %s --> %s\n' % (misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c[i]] for c in rev_char_outs[:rev_lens[i]] if c[i] in ix_to_char]))
     print '\n-------------------------------------------------------------------------------------------------'
     modelGen.train()
     modelEval.train()
