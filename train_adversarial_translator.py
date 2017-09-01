@@ -148,7 +148,7 @@ def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all
     # Now pass the generated samples to the evaluator
     # output has format: [auth_classifier out, hidden state, generic classifier out (optional])
     #---------------------------------------------------
-    eval_out_gen = modelEval.forward_classify(gen_samples_srt, adv_inp=True, lens=len_sorted.tolist())
+    eval_out_gen = modelEval.forward_classify(gen_samples_srt, adv_inp=True, lens=len_sorted.tolist(), drop == (backprop_for=='eval'))
     # Undo the sorting here
     eval_out_gen_sort = eval_out_gen[0].index_select(0, rev_sort_idx)
 
@@ -519,7 +519,7 @@ def main(params):
             gttargInps, gttargtargs, gttargauths ,gtlens = dp.prepare_data(batch_targauth, misc['char_to_ix'],
                                                    misc['auth_to_ix'], maxlen=params['max_seq_len'])
 
-            eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens)
+            eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens, drop = False)
 
             if params['weigh_feat_match']:
                 feat_match_weight = (-FN.log_softmax(eval_out_gt[0])[:,1-c_aid])
@@ -536,7 +536,7 @@ def main(params):
                 mlLoss = 0.
 
         if params['weigh_difficult'] > 0.:
-            eval_out_inp, _ = modelEval.forward_classify(targs, lens=lens)
+            eval_out_inp, _ = modelEval.forward_classify(targs, lens=lens, drop=False)
             sample_weight = (-FN.log_softmax(eval_out_inp)[:,1-c_aid]).detach()
             #sample_weight = (sample_weight/sample_weight.sum()).detach()
 
