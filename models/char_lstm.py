@@ -220,7 +220,7 @@ class CharLstm(nn.Module):
 
         return char_out
 
-    def forward_classify(self, x, h_prev=None, compute_softmax = False, predict_mode=False, adv_inp=False, lens=None):
+    def forward_classify(self, x, h_prev=None, compute_softmax = False, predict_mode=False, adv_inp=False, lens=None, drop=True):
         # x should be a numpy array of n_seq x n_batch dimensions
         # In this case batch will be a single sequence.
         n_auth = self.num_output_layers
@@ -232,9 +232,10 @@ class CharLstm(nn.Module):
             else:
                 x = Variable(x).cuda()
 
-            emb = self.enc_drop(self.encoder(x))
+            emb = self.enc_drop(self.encoder(x)) if drop else self.encoder(x)
         else:
-            emb = self.enc_drop(x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1))
+            emb_mul = x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1)
+            emb = self.enc_drop(emb_mul) if drop else emb_mul 
 
         # Pack the sentences as they can be of different lens
         packed = pack_padded_sequence(emb, lens)
@@ -244,10 +245,10 @@ class CharLstm(nn.Module):
 
         if not hasattr(self, 'decoder_cnnlayer'):
             if self.max_pool_rnn:
-                enc_out = self.dec_drop(torch.cat([packed_mean(rnn_out,dim=0), hidden[0][-1]],
-                    dim=-1))
+                ctxt = torch.cat([packed_mean(rnn_out,dim=0), hidden[0][-1]],dim=-1)
+                enc_out = self.dec_drop(ctxt) if drop else ctxt
             else:
-                enc_out = self.dec_drop(hidden[0][-1])
+                enc_out = self.dec_drop(hidden[0][-1]) if drop else hidden[0][-1]
             dec_in = enc_out
 
         W = self.decoder_W
