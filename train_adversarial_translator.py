@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 import math
-from pycrayon import CrayonClient
+#from pycrayon import CrayonClient
 import time
 import cProfile, pstats, io
 #from graphvisualize import make_dot
@@ -148,7 +148,7 @@ def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all
     # Now pass the generated samples to the evaluator
     # output has format: [auth_classifier out, hidden state, generic classifier out (optional])
     #---------------------------------------------------
-    eval_out_gen = modelEval.forward_classify(gen_samples_srt, adv_inp=True, lens=len_sorted.tolist(), drop == (backprop_for=='eval'))
+    eval_out_gen = modelEval.forward_classify(gen_samples_srt, adv_inp=True, lens=len_sorted.tolist(), drop = (backprop_for=='eval'))
     # Undo the sorting here
     eval_out_gen_sort = eval_out_gen[0].index_select(0, rev_sort_idx)
 
@@ -337,7 +337,7 @@ def main(params):
     eval_every = int(iter_per_epoch * params['eval_interval'])
 
     skip_first = 40
-    iters_eval = 5
+    iters_eval = 1
     iters_gen = 5
 
     #val_score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
@@ -506,6 +506,7 @@ def main(params):
         # Training the Generator
         #--------------------------------------------------------------------------
         optimGen.zero_grad()
+        modelGen.train()
         c_aid = np.random.choice(auth_to_ix.values())
         batch = dp.get_sentence_batch( params['batch_size'], split='train', atoms=params['atoms'],
                     aid=misc['ix_to_auth'][c_aid], sample_by_len = params['sample_by_len'])
@@ -531,7 +532,7 @@ def main(params):
                 ml_output, _ = modelGen.forward_mltrain(gttargInps, gtlens, gttargInps, gtlens, auths=gttargauths)
                 mlTarg = pack_padded_sequence(Variable(gttargtargs).cuda(), gtlens)
                 mlLoss = params['ml_update']*ml_criterion(pack_padded_sequence(ml_output,gtlens)[0], mlTarg[0])
-                mlLoss.backward(retain_graph=True)
+                mlLoss.backward()#retain_variables=True)
             else:
                 mlLoss = 0.
 
@@ -556,7 +557,6 @@ def main(params):
                         targ_mean_vec)
             else:
                 feature_match_loss = 0.
-                mlLoss = 0.
 
             #---------------------------------------------------------------------
             targets = Variable(auths).cuda()
@@ -638,7 +638,7 @@ def main(params):
         skip_first = 50 if i%500==499 else 1
         # Monitor the Error more frequently
         if i % 10 == 9:
-            err_a1, err_a2 = accum_err_eval[0]/accum_count_gen[0], accum_err_eval[1]/accum_count_gen[1]
+            err_a1, err_a2 = accum_err_eval[0]/(accum_count_gen[0]+1e-6), accum_err_eval[1]/(accum_count_gen[1]+1e-6)
 
         if i % params['log_interval'] == (params['log_interval'] - 1):
             interv = params['log_interval']
@@ -652,10 +652,10 @@ def main(params):
             lossEv_diff0 = accum_diff_eval[0]/(accum_count_eval[0]+1e-5) + (accum_count_eval[0]==0) * lossEv_diff0
             lossEv_diff1 = accum_diff_eval[1]/(accum_count_eval[1]+1e-5) + (accum_count_eval[1]==0) * lossEv_diff1
             elapsed = time.time() - start_time
-            print('| epoch {:2.2f} | {:5d}/{:5d} batches | lr {:02.2e} | ms/it {:5.2f} | '
+            print('| epoch {:2.2f} | {:5d}/{:5d} batches | lr {:02.2e} | ms/it {:5.2f} | t {:2.2f} | '
                   'loss - G {:3.2f} - Gc {:3.2f} - Gf {:3.2f} - E {:3.2f} - erra1 {:3.2f} - erra2 {:3.2f} - Ec {:3.2f}|'.format(
                       float(i) / iter_per_epoch, i, total_iters, params['learning_rate_gen'],
-                      elapsed * 1000 / args.log_interval, lossG, lossGcyc, lossGfeat, lossEv_tot, 100.*err_a1, 100.*err_a2,
+                      elapsed * 1000 / args.log_interval, modelGen.temp.data.mean(), lossG, lossGcyc, lossGfeat, lossEv_tot, 100.*err_a1, 100.*err_a2,
                       lossEv_const))
 
             if params['tensorboard']:
@@ -846,6 +846,8 @@ if __name__ == "__main__":
                         dest='softmax_scale', type=float, default=3.0)
     parser.add_argument('--gumbel_hard',
                         dest='gumbel_hard', type=bool, default=True)
+    parser.add_argument('--learn_gumbel',
+                        dest='learn_gumbel', type=bool, default=False)
 
 
     args = parser.parse_args()

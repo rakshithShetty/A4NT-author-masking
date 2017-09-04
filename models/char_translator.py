@@ -47,8 +47,15 @@ class CharTranslator(nn.Module):
         self.pad_auth_vec = params.get('pad_auth_vec',0)
 
         self.gumb_type = params.get('gumbel_hard', False)
+        self.learn_gumbel = params.get('learn_gumbel', False)
         self.softmax_scale = params.get('softmax_scale', 2.0)
         self.split_gen = params.get('split_generators', 0)
+
+        if self.learn_gumbel:
+           self.gumbel_W = nn.Parameter(torch.zeros([self.dec_hidden_size,
+               1]), True)
+           self.gumbel_b = nn.Parameter(torch.zeros([1]), True)
+
 
         # Initialize the model layers
         if self.pad_auth_vec:
@@ -121,6 +128,9 @@ class CharTranslator(nn.Module):
             if self.split_gen:
                 self.decoder_W_2.data.uniform_(-a, a)
                 self.decoder_b_2.data.fill_(0)
+
+        if self.learn_gumbel:
+           self.gumbel_W.data.uniform_(-0.01, 0.01)
 
         enc_h_sz = self.enc_hidden_size
         dec_h_sz = self.dec_hidden_size
@@ -352,7 +362,8 @@ class CharTranslator(nn.Module):
             # output is size seq * batch_size * vocab
             dec_out = p_rnn.mm(W) + b
             if  soft_samples:
-                samp = gumbel_softmax_sample(dec_out*self.softmax_scale, temp, hard=self.gumb_type)
+                self.temp = (FN.softplus(p_rnn.mm(self.gumbel_W)+self.gumbel_b) + 1.) if self.learn_gumbel else temp
+                samp = gumbel_softmax_sample(dec_out*self.softmax_scale, self.temp, hard=self.gumb_type)
                 emb = samp.mm(self.char_emb.weight)
                 _, pred_c = samp.data.max(dim=-1)
                 char_out.append(pred_c)
