@@ -179,7 +179,7 @@ def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, backprop_for='all
             for p in modelGen.parameters():
                 p.requires_grad = True
     else:
-        samples_out = (gen_samples_tensor, gen_lens)
+        samples_out = (gen_samples_tensor, gen_lens, char_outs)
 
     return (eval_out_gen_sort,) + eval_out_gen[1:] + samples_out
 
@@ -256,9 +256,11 @@ def main(params):
     modelGen = CharTranslator(params)
     modelEval = CharLstm(eval_params)
     # If using encoder for cycle loss
-    if params['cycle_loss_type'] == 'enc':
+    if params['cycle_loss_type'] == 'enc' or params['cycle_loss_type'] == 'noncyc_enc':
         modelGenEncoder = CharTranslator(params, encoder_only=True)
         modelGenEncoder.train()
+        for p in modelGenEncoder.parameters(): # reset requires_grad
+            p.requires_grad = False# they are set to False below in modelGen update
 
     # set to train mode, this activates dropout
     modelGen.train()
@@ -283,7 +285,7 @@ def main(params):
     # Do size averaging here so that classes are balanced
     bceLogitloss = nn.BCEWithLogitsLoss(size_average=True)
     eval_generic = nn.BCELoss(size_average=True)
-    cycle_loss_func = nn.CrossEntropyLoss() if params['cycle_loss_type'] == 'ml' else nn.L1Loss()
+    cycle_loss_func = nn.CrossEntropyLoss() if params['cycle_loss_type'] == 'ml' else nn.CosineEmbeddingLoss(margin=0.1) if params['cycle_loss_type'] == 'noncyc_enc' else nn.L1Loss()
     featmatch_l2_loss = nn.L1Loss()
     ml_criterion = nn.CrossEntropyLoss()
     accuracy_lay = nn.L1Loss()
@@ -296,7 +298,7 @@ def main(params):
         state = modelGen.state_dict()
         state.update(model_gen_state)
         modelGen.load_state_dict(state)
-        if params['cycle_loss_type'] == 'enc':
+        if params['cycle_loss_type'] == 'enc' or  params['cycle_loss_type'] == 'noncyc_enc':
             state = modelGenEncoder.state_dict()
             state.update({k:v for k,v in model_gen_state.iteritems() if k in state})
             modelGenEncoder.load_state_dict(state)
@@ -338,7 +340,7 @@ def main(params):
 
     skip_first = 40
     iters_eval = 1
-    iters_gen = 5
+    iters_gen = 1
 
     #val_score = eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
     # eval_model(dp, model, params, char_to_ix, auth_to_ix, split='val', max_docs = params['num_eval'])
@@ -391,6 +393,8 @@ def main(params):
         #--------------------------------------------------------------------------
         for p in modelEval.parameters(): # reset requires_grad
             p.requires_grad = True # they are set to False below in modelGen update
+        for p in modelGen.parameters(): # reset requires_grad
+            p.requires_grad = False# they are set to False below in modelGen update
         # eval_acc <= 60. or gen_acc >= 45. or it2<iters_eval*skip_first:
         while it2 < (iters_eval * skip_first) and (err_a1 > 0.05):
             c_aid = np.random.choice(auth_to_ix.values())
@@ -501,6 +505,8 @@ def main(params):
         #===========================================================================
         for p in modelEval.parameters():
             p.requires_grad = False # to avoid computation
+        for p in modelGen.parameters(): # reset requires_grad
+            p.requires_grad = True# they are set to False below in modelGen update
 
         #--------------------------------------------------------------------------
         # Training the Generator
@@ -545,7 +551,7 @@ def main(params):
         for gi in xrange(iters_gen):
             #import ipdb; ipdb.set_trace()
             outs = adv_forward_pass(modelGen, modelEval, inps, lens, end_c=misc['char_to_ix'][misc['endc']],
-                        maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None),
+                        maxlen=params['max_seq_len'], auths=auths, cycle_compute=(params['cycle_loss_type'] != None and params['cycle_loss_type'] != 'noncyc_enc'),
                         cycle_limit_backward=params['cycle_loss_limitback'], append_symb=append_tensor, temp=params['gumbel_temp'],
                         GradFilterLayer = GradFilterLayer, cycle_loss_type = params['cycle_loss_type'])
 
@@ -569,6 +575,21 @@ def main(params):
                 cyc_loss = params['cycle_loss_w'] * cycle_loss_func(outs[-3].sum(dim=0), cyc_targ)
                 rev_char_outs = outs[-1]; rev_gen_lens = outs[-2]
                 char_outs = outs[4]; gen_lens = outs[3]
+            elif params['cycle_loss_type'] == 'noncyc_enc':
+                enc_inp_gt = modelGenEncoder.forward_encode(inps, lens)
+                #-----------------------------------------------------------------------------------------------------------
+                # Compute encodings for the generated reverse sample!
+                gen_samples, gen_lens, char_outs, = outs[2], outs[3], outs[4]
+                len_sorted, gen_lensort_idx = gen_lens.sort(dim=0, descending=True)
+                _, rev_sort_idx = gen_lensort_idx.sort(dim=0)
+                rev_sort_idx = Variable(rev_sort_idx, requires_grad=False)
+                gen_samples_srt = gen_samples.index_select(1, Variable(gen_lensort_idx, requires_grad=False))
+                enc_inp = torch.cat([append_tensor, gen_samples_srt])
+                #reverse_inp = reverse_inp.detach()
+                rev_enc = modelGenEncoder.forward_encode(enc_inp, len_sorted.tolist(), adv_inp=True)
+                rev_enc_orig_order = rev_enc.index_select(0, rev_sort_idx)
+                #-----------------------------------------------------------------------------------------------------------
+                cyc_loss = params['cycle_loss_w'] * cycle_loss_func(rev_enc_orig_order, enc_inp_gt.detach(), ones[:rev_enc_orig_order.size(0)])
             elif params['cycle_loss_type'] == 'enc':
                 # Compute encodings for the groundtruth!
                 enc_inp_gt = modelGenEncoder.forward_encode(inps, lens)

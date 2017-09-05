@@ -17,11 +17,14 @@ class CharCNN(nn.Module):
         # Embedding layer
         self.encoder = nn.Embedding(self.n_words, self.emb_size, padding_idx=0)
         self.enc_drop = nn.Dropout(p=params.get('drop_prob_encoder',0.25))
+        self.n_layers = params.get('decoder_cnn_nlayers',1)
+        self.decoder_cnn_residual = params.get('decoder_cnn_residual',0)
 
         # Output decoder layer
         self.cnn_ks = params['decoder_cnn_ks']
         self.cnn_nfilt = params['decoder_cnn_nfilt']
-        self.decoder_cnn = nn.ModuleList([nn.Conv1d(self.emb_size,self.cnn_nfilt, K,padding=K) for K in self.cnn_ks])
+        cnn_inp_sizes = [self.emb_size] +( [self.cnn_nfilt*len(self.cnn_ks)] * (self.n_layers - 1))
+        self.decoder_cnn = nn.ModuleList([nn.ModuleList([nn.Conv1d(cnn_inp_sizes[i],self.cnn_nfilt, K,padding=K//2) for K in self.cnn_ks]) for i in xrange(self.n_layers)])
         self.decoder_cnnlayer = True
         decoder_size = self.cnn_nfilt*len(self.cnn_ks)
 
@@ -44,6 +47,10 @@ class CharCNN(nn.Module):
         self.decoder_W.data.uniform_(-1.73/a, 1.73/a)
         #self.encoder.weight.data.uniform_(-a, a)
         self.decoder_b.data.fill_(0)
+        for i in xrange(self.n_layers):
+            for cnn in self.decoder_cnn[i]:
+                cnn.weight.data.uniform_(-0.01, 0.01)
+                cnn.bias.data.zero_()
 
     def init_hidden(self, bsz):
         # Weight initializations for various parts.
@@ -70,9 +77,20 @@ class CharCNN(nn.Module):
         b = self.decoder_b.expand(b_sz, self.num_outputs)
 
         emb_sorted = emb.permute(1,2,0)
-        cnn_out = [FN.leaky_relu(conv(emb_sorted)) for conv in self.decoder_cnn]
-        cnn_pool_out = [FN.max_pool1d(cn, cn.size(2)).squeeze(2) for cn in cnn_out]
-        dec_in = self.dec_drop(torch.cat(cnn_pool_out, dim=1))
+        cnn_inp = [emb_sorted]
+        cnn_out = []
+        cnn_out_padded = []
+        for i in xrange(self.n_layers):
+            cnn_out.append([FN.leaky_relu(conv(cnn_inp[-1])) for conv in self.decoder_cnn[i]])
+            max_sz = cnn_out[-1][-1].size(2)
+            cnn_out_padded.append([FN.pad(cnn_out[-1][j].unsqueeze(3), (0,0,(max_sz-cnn_out[-1][j].size(2))//2,int(((max_sz-cnn_out[-1][j].size(2))/2. +0.5)//1))).squeeze(3) for j in xrange(len(cnn_out[-1]))])
+            cnn_inp.append(self.dec_drop(torch.cat(cnn_out_padded[-1], dim=1)))
+            if self.decoder_cnn_residual and i > 0 and (i%2)==0:
+                cnn_inp[-1] = cnn_inp[-1] + FN.pad(cnn_inp[-3].unsqueeze(3),(0,0,(max_sz-cnn_inp[-3].size(2)),0)).squeeze(3)
+
+
+        dec_in = FN.max_pool1d(cnn_inp[-1], cnn_inp[-1].size(2)).squeeze(2)
+
         enc_out = dec_in
 
         dec_out = dec_in.mm(W) + b

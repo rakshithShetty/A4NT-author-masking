@@ -200,6 +200,8 @@ if __name__ == "__main__":
 
   parser.add_argument('--decoder_mlp', dest='decoder_mlp', type=int, default=0, help='Use Mlp layer to do the classification')
   parser.add_argument('--decoder_cnn', dest='decoder_cnn', type=int, default=0, help='Use CNN layer to do the classification')
+  parser.add_argument('--decoder_cnn_residual', dest='decoder_cnn_residual', type=int, default=0, help='Use CNN layer to do the classification')
+  parser.add_argument('--decoder_cnn_nlayers', dest='decoder_cnn_nlayers', type=int, default=1, help='Use CNN layer to do the classification')
   parser.add_argument('--decoder_cnn_nfilt', dest='decoder_cnn_nfilt', type=int, default=100, help='Use Mlp layer to do the classification')
   parser.add_argument('--decoder_cnn_ks', dest='decoder_cnn_ks', nargs='+',type=int, default=[2,3,4], help='Use Mlp layer to do the classification')
   parser.add_argument('--no_encoder', dest='no_encoder' ,type=int, default=0, help='Use Mlp layer to do the classification')
