@@ -17,6 +17,7 @@ class CharLstm(nn.Module):
         self.emb_size = params.get('embedding_size',-1)
         self.hidden_size = params.get('hidden_size',-1)
         self.en_residual = params.get('en_residual_conn',0)
+        self.bidir = params.get('bidir',0)
 
         # Initialize the model layers
         # Embedding layer
@@ -26,15 +27,15 @@ class CharLstm(nn.Module):
         # Lstm Layers
         if self.en_residual:
             inp_sizes = [self.emb_size] + [self.hidden_size]*(self.num_rec_layers-1)
-            self.rec_layers = nn.ModuleList([nn.LSTM(inp_sizes[i], self.hidden_size, 1) for i in xrange(self.num_rec_layers)])
+            self.rec_layers = nn.ModuleList([nn.LSTM(inp_sizes[i], self.hidden_size, 1, bidirectional = self.bidir) for i in xrange(self.num_rec_layers)])
         else:
-            self.rec_layers = nn.LSTM(self.emb_size, self.hidden_size, self.num_rec_layers)
+            self.rec_layers = nn.LSTM(self.emb_size, self.hidden_size, self.num_rec_layers, bidirectional = self.bidir)
 
         self.max_pool_rnn = params.get('maxpoolrnn',0)
 
         # Output decoder layer
         if params.get('mode','generative')=='classifier':
-            decoder_size = self.hidden_size*(1+self.max_pool_rnn)
+            decoder_size = self.hidden_size*(1+(self.max_pool_rnn==1)) * (1+self.bidir)
             if params.get('decoder_mlp', 0):
                 self.decoder_W_mlp = nn.Parameter(torch.zeros([decoder_size,
                     params['decoder_mlp']]), True)
@@ -52,7 +53,7 @@ class CharLstm(nn.Module):
             self.decoder_b = nn.Parameter(torch.zeros([self.num_output_layers]), True)
 
             if params.get('generic_classifier',False):
-                self.generic_W = nn.Parameter(torch.zeros([self.hidden_size*(1+self.max_pool_rnn),1]), True)
+                self.generic_W = nn.Parameter(torch.zeros([self.hidden_size*(1+(self.max_pool_rnn==1)),1]), True)
                 self.generic_b = nn.Parameter(torch.zeros([1]), True)
         else:
             self.decoder_W = nn.Parameter(torch.zeros([self.num_output_layers, self.hidden_size,
@@ -88,16 +89,22 @@ class CharLstm(nn.Module):
           for i in xrange(self.num_rec_layers):
             self.rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
             self.rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
+            if self.bidir:
+                self.rec_layers[i].bias_ih_l0_reverse.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
+                self.rec_layers[i].bias_hh_l0_reverse.data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
         else:
           for i in xrange(self.num_rec_layers):
-            getattr(self.rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 0.)
-            getattr(self.rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 0.)
+            getattr(self.rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
+            getattr(self.rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
+            if self.bidir:
+                getattr(self.rec_layers,'bias_ih_l'+str(i)+'_reverse').data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
+                getattr(self.rec_layers,'bias_hh_l'+str(i)+'_reverse').data.index_fill_(0, torch.arange(h_sz +1, h_sz*2).long(), 2.)
 
     def init_hidden(self, bsz):
         # Weight initializations for various parts.
         weight = next(self.parameters()).data
-        return (Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()),
-                    Variable(weight.new(self.num_rec_layers, bsz, self.hidden_size).zero_()))
+        return (Variable(weight.new(self.num_rec_layers*(1+self.bidir), bsz, self.hidden_size).zero_()),
+                    Variable(weight.new(self.num_rec_layers*(1+self.bidir), bsz, self.hidden_size).zero_()))
 
     def _my_recurrent_layer(self, packed, h_prev = None):
         if self.en_residual:
@@ -235,7 +242,7 @@ class CharLstm(nn.Module):
             emb = self.enc_drop(self.encoder(x)) if drop else self.encoder(x)
         else:
             emb_mul = x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1)
-            emb = self.enc_drop(emb_mul) if drop else emb_mul 
+            emb = self.enc_drop(emb_mul) if drop else emb_mul
 
         # Pack the sentences as they can be of different lens
         packed = pack_padded_sequence(emb, lens)
@@ -244,8 +251,12 @@ class CharLstm(nn.Module):
 
 
         if not hasattr(self, 'decoder_cnnlayer'):
-            if self.max_pool_rnn:
+            if self.max_pool_rnn==1:
                 ctxt = torch.cat([packed_mean(rnn_out,dim=0), hidden[0][-1]],dim=-1)
+                enc_out = self.dec_drop(ctxt) if drop else ctxt
+            elif self.max_pool_rnn==2:
+                rnn_unp,_= pad_packed_sequence(rnn_out)
+                ctxt,_ = rnn_unp.max(dim=0)
                 enc_out = self.dec_drop(ctxt) if drop else ctxt
             else:
                 enc_out = self.dec_drop(hidden[0][-1]) if drop else hidden[0][-1]

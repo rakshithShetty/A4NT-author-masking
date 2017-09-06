@@ -102,7 +102,7 @@ def main(params):
     dp = DataProvider(cp_params)
     modelGen = CharTranslator(cp_params)
     modelEval = CharLstm(eval_params)
-    
+
     startc = dp.data['configs']['start']
     endc = dp.data['configs']['end']
 
@@ -131,6 +131,8 @@ def main(params):
     accum_prec_rev = np.zeros(len(auth_to_ix))
 
     jc = '' if cp_params.get('atoms','char') == 'char' else ' '
+    result = {'docs':[], 'misc':None, 'cp_params':cp_params, 'params': params}
+    c_doc = {'sents':[]}
 
     for i, b_data in tqdm(enumerate(dp.iter_sentences(split=params['split'], atoms=cp_params.get('atoms','word'), batch_size = params['batch_size']))):
         if i > params['num_samples'] and params['num_samples']>0:
@@ -139,6 +141,7 @@ def main(params):
         #c_aid = np.random.choice(auth_to_ix.values())
         #batch = dp.get_sentence_batch(1,split=params['split'], atoms=cp_params.get('atoms','char'), aid=ix_to_auth[c_aid])
         c_bsz = len(b_data[0])
+        done = b_data[1]
         inps, targs, auths, lens = dp.prepare_data(b_data[0], char_to_ix, auth_to_ix, maxlen=cp_params['max_seq_len'])
         # outs are organized as
         auths_inp = 1 - auths if params['flip'] else auths
@@ -165,6 +168,14 @@ def main(params):
                 revgenset = set([c[b] for c in outs[-2][:outs[-1][b]] ])
                 accum_recall_rev[auths_inp[b]]  += (float(len(revgenset & inpset)) / float(len(inpset)))
                 accum_prec_rev[auths_inp[b]]    += (float(len(revgenset & inpset)) / float(len(revgenset)))
+        for b in xrange(inps.size()[1]):
+            inp_text = jc.join([ix_to_char[c] for c in targs[:,b] if c in ix_to_char])
+            trans_text = jc.join([ix_to_char[c.cpu()[b]] for c in outs[1][:outs[2][b]] if c.cpu()[b] in ix_to_char])
+            c_doc['sents'].append({'sent':inp_text,'score':eval_out_gt[0][b].data.cpu().tolist(), 'trans': trans_text, 'trans_score':outs[0][b].cpu().tolist()})
+        if done:
+            c_doc['attrib'] = b_data[0][-1]['attrib']
+            result['docs'].append(c_doc)
+            c_doc = {'sents':[]}
 
         if params['print']:
             print '--------------------------------------------'
@@ -199,6 +210,9 @@ def main(params):
         print 'Reconstr  text A0- Precision = %.2f, Recall = %.2f'%(accum_prec_rev[0]/accum_count_gen[0], accum_recall_rev[0]/accum_count_gen[0] )
         print 'Reconstr  text A1- Precision = %.2f, Recall = %.2f'%(accum_prec_rev[1]/accum_count_gen[1], accum_recall_rev[1]/accum_count_gen[1] )
 
+    if params['dumpjson']:
+       json.dump(result, open(params['dumpjson'],'w'))
+
 
 if __name__ == "__main__":
 
@@ -215,6 +229,7 @@ if __name__ == "__main__":
   parser.add_argument('--m_type', dest='m_type', type=str, default='generative', help='type')
   parser.add_argument('--flip', dest='flip', type=int, default=0, help='flip authors')
   parser.add_argument('--print', dest='print', type=int, default=0, help='Print scores')
+  parser.add_argument('--dumpjson', dest='dumpjson', type=str, default=None, help='Print scores')
 
 
   args = parser.parse_args()
