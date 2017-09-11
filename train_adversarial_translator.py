@@ -11,6 +11,7 @@ from utils.utils import repackage_hidden, eval_translator, eval_classify
 from torch.autograd import Variable, Function
 import torch.nn.functional as FN
 
+from models.fb_semantic_encoder import BLSTMEncoder
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -257,7 +258,17 @@ def main(params):
     modelEval = CharLstm(eval_params)
     # If using encoder for cycle loss
     if params['cycle_loss_type'] == 'enc' or params['cycle_loss_type'] == 'noncyc_enc':
-        modelGenEncoder = CharTranslator(params, encoder_only=True)
+        if params['use_semantic_encoder']:
+            modelGenEncoder = BLSTMEncoder(char_to_ix, ix_to_char)
+            encoderState = torch.load(params['use_semantic_encoder'])
+        else:
+            modelGenEncoder = CharTranslator(params, encoder_only=True)
+            encoderState = model_gen_state
+        state = modelGenEncoder.state_dict()
+        for k in encoderState:
+            if k in state:
+                state[k] = encoderState[k]
+        modelGenEncoder.load_state_dict(state)
         modelGenEncoder.train()
         for p in modelGenEncoder.parameters(): # reset requires_grad
             p.requires_grad = False# they are set to False below in modelGen update
@@ -844,6 +855,8 @@ if __name__ == "__main__":
                         dest='feature_matching', type=float, default=None)
     parser.add_argument('--cycle_loss_type',
                         dest='cycle_loss_type', type=str, default=None)
+    parser.add_argument('--use_semantic_encoder',
+                        dest='use_semantic_encoder', type=str, default=None)
     parser.add_argument('--cycle_loss_enc_meanvec',
                         dest='encoder_mean_vec', type=int, default=1)
     parser.add_argument('--cycle_loss_w',
