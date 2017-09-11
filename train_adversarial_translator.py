@@ -296,7 +296,7 @@ def main(params):
     # Do size averaging here so that classes are balanced
     bceLogitloss = nn.BCEWithLogitsLoss(size_average=True)
     eval_generic = nn.BCELoss(size_average=True)
-    cycle_loss_func = nn.CrossEntropyLoss() if params['cycle_loss_type'] == 'ml' else nn.CosineEmbeddingLoss(margin=0.1) if params['cycle_loss_type'] == 'noncyc_enc' else nn.L1Loss()
+    cycle_loss_func = nn.CrossEntropyLoss() if params['cycle_loss_type'] == 'ml' else nn.CosineEmbeddingLoss(margin=0.1) if params['cycle_loss_func'] == 'cosine' else nn.L1Loss()
     featmatch_l2_loss = nn.L1Loss()
     ml_criterion = nn.CrossEntropyLoss()
     accuracy_lay = nn.L1Loss()
@@ -330,6 +330,7 @@ def main(params):
     accum_count_eval = np.zeros(len(auth_to_ix))
     accum_count_gen = np.zeros(len(auth_to_ix))
     avgL_gen = 0.
+    avgL_genGan = 0.
     avgL_eval = 0.
     avgL_gt = 0.
     avgL_const= 0.
@@ -600,7 +601,10 @@ def main(params):
                 rev_enc = modelGenEncoder.forward_encode(enc_inp, len_sorted.tolist(), adv_inp=True)
                 rev_enc_orig_order = rev_enc.index_select(0, rev_sort_idx)
                 #-----------------------------------------------------------------------------------------------------------
-                cyc_loss = params['cycle_loss_w'] * cycle_loss_func(rev_enc_orig_order, enc_inp_gt.detach(), ones[:rev_enc_orig_order.size(0)])
+                if params['cycle_loss_func'] == 'cosine':
+                    cyc_loss = params['cycle_loss_w'] * cycle_loss_func(rev_enc_orig_order, enc_inp_gt.detach(), ones[:rev_enc_orig_order.size(0)])
+                else:
+                    cyc_loss = params['cycle_loss_w'] * cycle_loss_func(rev_enc_orig_order, enc_inp_gt.detach())
             elif params['cycle_loss_type'] == 'enc':
                 # Compute encodings for the groundtruth!
                 enc_inp_gt = modelGenEncoder.forward_encode(inps, lens)
@@ -632,10 +636,15 @@ def main(params):
             elif not params['wasserstien_loss']:
                 targ_aid = 1 - c_aid
                 gen_aid_out = outs[0][:, targ_aid]
-                if params['weigh_difficult'] > 0.:
-                    loss_aid = FN.binary_cross_entropy_with_logits(gen_aid_out, ones[:gen_aid_out.size(0)],sample_weight, size_average=True)
+                if not params['maximize_entropy']:
+                    if params['weigh_difficult'] > 0.:
+                        loss_aid = FN.binary_cross_entropy_with_logits(gen_aid_out, ones[:gen_aid_out.size(0)],sample_weight, size_average=True)
+                    else:
+                        loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
                 else:
-                    loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
+                    # Compute entropy of the classifier and maximize it
+                    p = torch.sigmoid(gen_aid_out)
+                    loss_aid = (p * torch.log(p) + (1.-p) * torch.log(1.-p)).mean()
                 lossGen = 5.*loss_aid
             elif params['wasserstien_loss']:
                 targ_aid = 1 - c_aid
@@ -658,6 +667,7 @@ def main(params):
         # Take an optimization step
         optimGen.step()
         avgL_gen += lossGenTot.data.cpu().numpy()[0]
+        avgL_genGan += lossGen.data.cpu().numpy()[0]
         avg_cyc_loss += cyc_loss.data.cpu().numpy()[0] if type(cyc_loss) != float else cyc_loss
         avg_feat_loss+= feature_match_loss.data.cpu().numpy()[0] if type(feature_match_loss) != float else feature_match_loss
         #===========================================================================
@@ -677,6 +687,7 @@ def main(params):
             lossGcyc = avg_cyc_loss / interv
             lossGfeat = avg_feat_loss / interv
             lossG = avgL_gen / interv
+            lossG_gan = avgL_genGan / interv
             lossEv_tot = avgL_eval / (accum_count_eval.sum()+1e-5) + (accum_count_eval.sum()==0) * lossEv_tot
             lossEv_gt = avgL_gt / (accum_count_eval.sum()+1e-5) + (accum_count_eval.sum()==0) * lossEv_gt
             lossEv_const= avgL_const/  (accum_count_eval.sum()+1e-5) + (accum_count_eval.sum()==0) * lossEv_const
@@ -685,9 +696,9 @@ def main(params):
             lossEv_diff1 = accum_diff_eval[1]/(accum_count_eval[1]+1e-5) + (accum_count_eval[1]==0) * lossEv_diff1
             elapsed = time.time() - start_time
             print('| epoch {:2.2f} | {:5d}/{:5d} batches | lr {:02.2e} | ms/it {:5.2f} | t {:2.2f} | '
-                  'loss - G {:3.2f} - Gc {:3.2f} - Gf {:3.2f} - E {:3.2f} - erra1 {:3.2f} - erra2 {:3.2f} - Ec {:3.2f}|'.format(
+                  'loss - G {:3.2f} - Gg {:3.2f} - Gc {:3.2f} - Gf {:3.2f} - E {:3.2f} - erra1 {:3.2f} - erra2 {:3.2f} - Ec {:3.2f}|'.format(
                       float(i) / iter_per_epoch, i, total_iters, params['learning_rate_gen'],
-                      elapsed * 1000 / args.log_interval, modelGen.temp.data.mean(), lossG, lossGcyc, lossGfeat, lossEv_tot, 100.*err_a1, 100.*err_a2,
+                      elapsed * 1000 / args.log_interval, modelGen.temp.data.mean(), lossG, lossG_gan, lossGcyc, lossGfeat, lossEv_tot, 100.*err_a1, 100.*err_a2,
                       lossEv_const))
 
             if params['tensorboard']:
@@ -700,6 +711,7 @@ def main(params):
             #if (100.*accum_err_eval[0]/ accum_count_eval[0]) < 0.11:
             #    import ipdb; ipdb.set_trace()
             avgL_gen = 0.
+            avgL_genGan = 0.
             avgL_eval = 0.
             avgL_gt = 0.
             avgL_const= 0.
@@ -749,6 +761,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--weigh_difficult', dest='weigh_difficult', type=float, default=.0, help='')
     parser.add_argument('--weigh_feat_match', dest='weigh_feat_match', type=float, default=.0, help='')
+    parser.add_argument('--maximize_entropy', dest='maximize_entropy', type=int, default=0, help='')
 
     # mode
     parser.add_argument('--mode', dest='mode', type=str,
@@ -855,6 +868,8 @@ if __name__ == "__main__":
                         dest='feature_matching', type=float, default=None)
     parser.add_argument('--cycle_loss_type',
                         dest='cycle_loss_type', type=str, default=None)
+    parser.add_argument('--cycle_loss_func',
+                        dest='cycle_loss_func', type=str, default='l1')
     parser.add_argument('--use_semantic_encoder',
                         dest='use_semantic_encoder', type=str, default=None)
     parser.add_argument('--cycle_loss_enc_meanvec',
