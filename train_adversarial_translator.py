@@ -259,7 +259,7 @@ def main(params):
     # If using encoder for cycle loss
     if params['cycle_loss_type'] == 'enc' or params['cycle_loss_type'] == 'noncyc_enc':
         if params['use_semantic_encoder']:
-            modelGenEncoder = BLSTMEncoder(char_to_ix, ix_to_char)
+            modelGenEncoder = BLSTMEncoder(char_to_ix, ix_to_char, params['glove_path'])
             encoderState = torch.load(params['use_semantic_encoder'])
         else:
             modelGenEncoder = CharTranslator(params, encoder_only=True)
@@ -872,6 +872,8 @@ if __name__ == "__main__":
                         dest='cycle_loss_func', type=str, default='l1')
     parser.add_argument('--use_semantic_encoder',
                         dest='use_semantic_encoder', type=str, default=None)
+    parser.add_argument('--glove_path',
+                        dest='glove_path', type=str, default='default')
     parser.add_argument('--cycle_loss_enc_meanvec',
                         dest='encoder_mean_vec', type=int, default=1)
     parser.add_argument('--cycle_loss_w',

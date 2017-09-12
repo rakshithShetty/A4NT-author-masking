@@ -20,7 +20,7 @@ InferSent encoder
 
 class BLSTMEncoder(nn.Module):
 
-    def __init__(self, word_to_ix, ix_to_word):
+    def __init__(self, word_to_ix, ix_to_word, glove_path = 'default'):
         super(BLSTMEncoder, self).__init__()
         # hardcode here for configuration used by pretrained facebook model
         self.bsize = 128 #config['bsize']
@@ -28,7 +28,7 @@ class BLSTMEncoder(nn.Module):
         self.enc_lstm_dim = 2048# config['enc_lstm_dim']
         self.pool_type = 'max'#config['pool_type']
         self.dpout_model = 0.0 #config['dpout_model']
-        self.glove_path = '/BS/rshetty-wrk/work/code/author-mask/tools/InferSent/dataset/GloVe/glove.840B.300d.txt'
+        self.glove_path = '/BS/rshetty-wrk/work/code/author-mask/tools/InferSent/dataset/GloVe/glove.840B.300d.txt' if glove_path =='default' else glove_path
 
         self.enc_lstm = nn.LSTM(self.word_emb_dim, self.enc_lstm_dim, 1,
                                 bidirectional=True, dropout=self.dpout_model)

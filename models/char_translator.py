@@ -34,14 +34,14 @@ class CharTranslator(nn.Module):
         self.encoder_only = encoder_only
         self.encoder_mean_vec = params.get('encoder_mean_vec', 0)
         self.vocab_size = params.get('vocabulary_size',-1) + 1
+        self.no_encoder = params.get('no_encoder',0)
 
         self.enc_num_rec_layers = params.get('enc_hidden_depth',-1)
-        self.dec_num_rec_layers = params.get('dec_hidden_depth',-1)
-
         self.enc_noise = params.get('apply_noise',0)
 
         self.emb_size = params.get('embedding_size',-1)
         self.enc_hidden_size = params.get('enc_hidden_size',-1)
+        self.dec_num_rec_layers = params.get('dec_hidden_depth',-1)
         self.dec_hidden_size = params.get('dec_hidden_size',-1)
         self.en_residual = params.get('en_residual_conn',1)
         self.pad_auth_vec = params.get('pad_auth_vec',0)
@@ -64,22 +64,21 @@ class CharTranslator(nn.Module):
         self.char_emb = nn.Embedding(self.vocab_size, self.emb_size, padding_idx=0)
         self.emb_drop = nn.Dropout(p=params.get('drop_prob_emb',0.25))
 
-        self.enc_drop = nn.Dropout(p=params.get('drop_prob_encoder',0.25))
-        self.max_pool_rnn = params.get('maxpoolrnn',0)
-
         # Translator consists of an encoder - attention layer - decoder
         # Encoder is an lstm network with which takes character embedding vectors as input
         # Decoder is an lstm network which takes hidden states from encoder as input and
         # outputs series of characters
 
         # Encoder Lstm Layers
-        if self.en_residual:
-            inp_sizes = [self.emb_size] + [self.enc_hidden_size]*(self.enc_num_rec_layers-1)
-            self.enc_rec_layers = nn.ModuleList([nn.LSTM(inp_sizes[i], self.enc_hidden_size, 1) for i in xrange(self.enc_num_rec_layers)])
-        else:
-            self.enc_rec_layers = nn.LSTM(self.emb_size, self.enc_hidden_size, self.enc_num_rec_layers)
+        if not self.no_encoder:
+            if self.en_residual:
+                inp_sizes = [self.emb_size] + [self.enc_hidden_size]*(self.enc_num_rec_layers-1)
+                self.enc_rec_layers = nn.ModuleList([nn.LSTM(inp_sizes[i], self.enc_hidden_size, 1) for i in xrange(self.enc_num_rec_layers)])
+            else:
+                self.enc_rec_layers = nn.LSTM(self.emb_size, self.enc_hidden_size, self.enc_num_rec_layers)
+            self.enc_drop = nn.Dropout(p=params.get('drop_prob_encoder',0.25))
+            self.max_pool_rnn = params.get('maxpoolrnn',0)
 
-        self.pool_enc = params.get('maxpoolrnn',0)
 
         if not encoder_only:
             # Decoder Lstm Layers
@@ -136,9 +135,10 @@ class CharTranslator(nn.Module):
         dec_h_sz = self.dec_hidden_size
         # LSTM forget gate could be initialized to high value (1.)
         if self.en_residual:
-          for i in xrange(self.enc_num_rec_layers):
-            self.enc_rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
-            self.enc_rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+          if not self.no_encoder:
+            for i in xrange(self.enc_num_rec_layers):
+              self.enc_rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+              self.enc_rec_layers[i].bias_hh_l0.data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
           if not self.encoder_only:
             for i in xrange(self.dec_num_rec_layers):
               self.dec_rec_layers[i].bias_ih_l0.data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
@@ -147,9 +147,10 @@ class CharTranslator(nn.Module):
                   self.dec_rec_layers_2[i].bias_ih_l0.data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
                   self.dec_rec_layers_2[i].bias_hh_l0.data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
         else:
-          for i in xrange(self.enc_num_rec_layers):
-            getattr(self.enc_rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
-            getattr(self.enc_rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+          if not self.no_encoder:
+            for i in xrange(self.enc_num_rec_layers):
+              getattr(self.enc_rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
+              getattr(self.enc_rec_layers,'bias_hh_l'+str(i)).data.index_fill_(0, torch.arange(enc_h_sz +1, enc_h_sz*2).long(), 1.)
           if not self.encoder_only:
             for i in xrange(self.dec_num_rec_layers):
               getattr(self.dec_rec_layers,'bias_ih_l'+str(i)).data.index_fill_(0, torch.arange(dec_h_sz +1, dec_h_sz*2).long(), 1.)
@@ -200,44 +201,47 @@ class CharTranslator(nn.Module):
         b_sz = inp.size(1)
         n_steps = inp.size(0)
 
-        if not adv_inp:
-            if self.training:
-                inp = Variable(inp).cuda()
+        if not self.no_encoder:
+            if not adv_inp:
+                if self.training:
+                    inp = Variable(inp).cuda()
+                else:
+                    inp = Variable(inp,volatile=True).cuda()
+
+                emb = self.emb_drop(self.char_emb(inp))
             else:
-                inp = Variable(inp,volatile=True).cuda()
+                emb = inp.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1)
 
-            emb = self.emb_drop(self.char_emb(inp))
+            # Embed the sequence of characters
+            packed = pack_padded_sequence(emb, lengths_inp)
+
+            # Encode the sequence of input characters
+            h_prev_enc = h_prev if h_prev !=None or b_sz != self.zero_hidden_bsz else self.zero_hidden
+            enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev=h_prev_enc, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
+
+            enc_rnn_out_unp = pad_packed_sequence(enc_rnn_out)
+            enc_rnn_out = enc_rnn_out_unp[0]
+
+            if self.max_pool_rnn:
+                ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][-1]],
+                    dim=-1)
+            else:
+                ctxt = enc_hidden[0][-1]
+
+            if type(sort_enc) != type(None):
+                ctxt_sorted = ctxt.index_select(0,sort_enc)
+            else:
+                ctxt_sorted = ctxt
+
+            if self.pad_auth_vec:
+                ctxt_sorted = torch.cat([ctxt_sorted,self.auth_emb(Variable(auths).cuda())], dim=-1)
+
+            if self.enc_noise:
+                ctxt_sorted = ctxt_sorted + Variable(torch.cuda.FloatTensor(ctxt_sorted.size()).normal_()/20., requires_grad=False)
+            else:
+                ctxt_sorted = self.enc_drop(ctxt_sorted)
         else:
-            emb = inp.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1)
-
-        # Embed the sequence of characters
-        packed = pack_padded_sequence(emb, lengths_inp)
-
-        # Encode the sequence of input characters
-        h_prev_enc = h_prev if h_prev !=None or b_sz != self.zero_hidden_bsz else self.zero_hidden
-        enc_rnn_out, enc_hidden = self._my_recurrent_layer(packed, h_prev=h_prev_enc, rec_func = self.enc_rec_layers, n_layers = self.enc_num_rec_layers)
-
-        enc_rnn_out_unp = pad_packed_sequence(enc_rnn_out)
-        enc_rnn_out = enc_rnn_out_unp[0]
-
-        if self.max_pool_rnn:
-            ctxt = torch.cat([torch.mean(enc_rnn_out,dim=0,keepdim=False), enc_hidden[0][-1]],
-                dim=-1)
-        else:
-            ctxt = enc_hidden[0][-1]
-
-        if type(sort_enc) != type(None):
-            ctxt_sorted = ctxt.index_select(0,sort_enc)
-        else:
-            ctxt_sorted = ctxt
-
-        if self.pad_auth_vec:
-            ctxt_sorted = torch.cat([ctxt_sorted,self.auth_emb(Variable(auths).cuda())], dim=-1)
-
-        if self.enc_noise:
-            ctxt_sorted = ctxt_sorted + Variable(torch.cuda.FloatTensor(ctxt_sorted.size()).normal_()/20., requires_grad=False)
-        else:
-            ctxt_sorted = self.enc_drop(ctxt_sorted)
+            enc_hidden = None
 
         # Setup target variable now
         targ = Variable(targ).cuda()
@@ -245,7 +249,10 @@ class CharTranslator(nn.Module):
         # Concat the context vector from the encoder
         n_steps_targ = targ.size(0)
 
-        dec_inp = torch.cat([ctxt_sorted.expand(n_steps_targ,b_sz,ctxt_sorted.size(1)), targ_emb], dim=-1)
+        if not self.no_encoder:
+            dec_inp = torch.cat([ctxt_sorted.expand(n_steps_targ,b_sz,ctxt_sorted.size(1)), targ_emb], dim=-1)
+        else:
+            dec_inp = targ_emb
         targ_packed = pack_padded_sequence(dec_inp, lengths_targ)
 
         # Decode the output sequence using encoder state

@@ -35,7 +35,7 @@ class CharLstm(nn.Module):
 
         # Output decoder layer
         if params.get('mode','generative')=='classifier':
-            decoder_size = self.hidden_size*(1+(self.max_pool_rnn==1)) * (1+self.bidir)
+            decoder_size = self.hidden_size*(1+((self.max_pool_rnn==1)|(self.max_pool_rnn==3))) * (1+self.bidir)
             if params.get('decoder_mlp', 0):
                 self.decoder_W_mlp = nn.Parameter(torch.zeros([decoder_size,
                     params['decoder_mlp']]), True)
@@ -257,6 +257,10 @@ class CharLstm(nn.Module):
             elif self.max_pool_rnn==2:
                 rnn_unp,_= pad_packed_sequence(rnn_out)
                 ctxt,_ = rnn_unp.max(dim=0)
+                enc_out = self.dec_drop(ctxt) if drop else ctxt
+            elif self.max_pool_rnn==3:
+                rnn_unp,_= pad_packed_sequence(rnn_out)
+                ctxt = torch.cat([rnn_unp.max(dim=0)[0],hidden[0].transpose(0,1).contiguous().view(b_sz,-1)],dim=-1)
                 enc_out = self.dec_drop(ctxt) if drop else ctxt
             else:
                 enc_out = self.dec_drop(hidden[0][-1]) if drop else hidden[0][-1]
