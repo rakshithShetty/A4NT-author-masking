@@ -105,10 +105,10 @@ def disp_gen_samples(modelGen, modelEval, dp, misc, maxlen=100, n_disp=5, atoms=
     gen_lens, char_outs, rev_lens, rev_char_outs = outs[-5], outs[-4], outs[-2], outs[-1]
     print '----------------------Visualising Some Generated Samples-----------------------------------------\n'
     for i in xrange(len(lens)):
-        print '%d Inp : %s --> %s' % (i, misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c] for c in inps.numpy()[1:, i] if c in ix_to_char]))
-        print '  Out : %s --> %s' % (misc['ix_to_auth'][1-auths[i]], jc.join([ix_to_char[c[i]] for c in char_outs[:gen_lens[i]] if c[i] in ix_to_char]))
+        print '%d Inp : %6s --> %s' % (i, misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c] for c in inps.numpy()[1:, i] if c in ix_to_char]))
+        print '  Out : %6s --> %s' % (misc['ix_to_auth'][1-auths[i]], jc.join([ix_to_char[c[i]] for c in char_outs[:gen_lens[i]] if c[i] in ix_to_char]))
         #print '%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
-        print '  Rev : %s --> %s\n' % (misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c[i]] for c in rev_char_outs[:rev_lens[i]] if c[i] in ix_to_char]))
+        print '  Rev : %6s --> %s\n' % (misc['ix_to_auth'][auths[i]], jc.join([ix_to_char[c[i]] for c in rev_char_outs[:rev_lens[i]] if c[i] in ix_to_char]))
     print '\n-------------------------------------------------------------------------------------------------'
     modelGen.train()
     modelEval.train()
@@ -532,6 +532,8 @@ def main(params):
                                     maxlen=params['max_seq_len'])
 
         # This needs to be done only once
+        
+        mlLoss = 0.
         if params['feature_matching'] != None:
             batch_targauth = dp.get_sentence_batch(params['batch_size'], split='train',
                                                    atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid], sample_by_len = params['sample_by_len'])
@@ -551,8 +553,6 @@ def main(params):
                 mlTarg = pack_padded_sequence(Variable(gttargtargs).cuda(), gtlens)
                 mlLoss = params['ml_update']*ml_criterion(pack_padded_sequence(ml_output,gtlens)[0], mlTarg[0])
                 mlLoss.backward()#retain_variables=True)
-            else:
-                mlLoss = 0.
 
         if params['weigh_difficult'] > 0.:
             eval_out_inp, _ = modelEval.forward_classify(targs, lens=lens, drop=False)
@@ -645,16 +645,16 @@ def main(params):
                     # Compute entropy of the classifier and maximize it
                     p = torch.sigmoid(gen_aid_out)
                     loss_aid = (p * torch.log(p) + (1.-p) * torch.log(1.-p)).mean()
-                lossGen = 5.*loss_aid
+                lossGen = 20.*loss_aid
             elif params['wasserstien_loss']:
                 targ_aid = 1 - c_aid
                 gen_aid_out = outs[0][:, targ_aid]
                 E_gen = gen_aid_out.mean()
                 lossGen = -E_gen
 
-            accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean() + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
+            accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean())# + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
             accum_count_gen[targ_aid] += 1.
-            lossGenTot = lossGen + cyc_loss + feature_match_loss
+            lossGenTot = lossGen +mlLoss + cyc_loss + feature_match_loss
             #lossGenTot = cyc_loss# +mlLoss #+ lossGen + cyc_loss + feature_match_loss
             lossGenTot.backward()
 
@@ -673,7 +673,7 @@ def main(params):
         #===========================================================================
 
         # Visualize some generator samples once in a while
-        if i % 200 == 199:
+        if i % 1000 == 999:
             disp_gen_samples( modelGen, modelEval, dp, misc,
                     maxlen=params['max_seq_len'], atoms=params['atoms'],
                     append_tensor=append_tensor_disp)
