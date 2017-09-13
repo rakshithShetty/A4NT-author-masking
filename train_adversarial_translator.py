@@ -532,21 +532,22 @@ def main(params):
                                     maxlen=params['max_seq_len'])
 
         # This needs to be done only once
-        
+
         mlLoss = 0.
-        if params['feature_matching'] != None:
+        if params['feature_matching'] or params['ml_update']:
             batch_targauth = dp.get_sentence_batch(params['batch_size'], split='train',
                                                    atoms=params['atoms'], aid=misc['ix_to_auth'][1-c_aid], sample_by_len = params['sample_by_len'])
             gttargInps, gttargtargs, gttargauths ,gtlens = dp.prepare_data(batch_targauth, misc['char_to_ix'],
                                                    misc['auth_to_ix'], maxlen=params['max_seq_len'])
 
-            eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens, drop = False)
+            if params['feature_matching']:
+                eval_out_gt = modelEval.forward_classify(gttargtargs, lens=gtlens, drop = False)
 
-            if params['weigh_feat_match']:
-                feat_match_weight = (-FN.log_softmax(eval_out_gt[0])[:,1-c_aid])
-                feat_match_weight = feat_match_weight / feat_match_weight.sum()
+                if params['weigh_feat_match']:
+                    feat_match_weight = (-FN.log_softmax(eval_out_gt[0])[:,1-c_aid])
+                    feat_match_weight = feat_match_weight / feat_match_weight.sum()
 
-            targ_mean_vec = eval_out_gt[1].mean(dim=0).detach() if params['weigh_feat_match']==0. else (eval_out_gt[1]*feat_match_weight[:,None]).sum(dim=0).detach()
+                targ_mean_vec = eval_out_gt[1].mean(dim=0).detach() if params['weigh_feat_match']==0. else (eval_out_gt[1]*feat_match_weight[:,None]).sum(dim=0).detach()
 
             if params['ml_update']:
                 ml_output, _ = modelGen.forward_mltrain(gttargInps, gtlens, gttargInps, gtlens, auths=gttargauths)
@@ -654,7 +655,7 @@ def main(params):
 
             accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean())# + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
             accum_count_gen[targ_aid] += 1.
-            lossGenTot = lossGen +mlLoss + cyc_loss + feature_match_loss
+            lossGenTot = lossGen + cyc_loss + feature_match_loss
             #lossGenTot = cyc_loss# +mlLoss #+ lossGen + cyc_loss + feature_match_loss
             lossGenTot.backward()
 
@@ -673,7 +674,7 @@ def main(params):
         #===========================================================================
 
         # Visualize some generator samples once in a while
-        if i % 1000 == 999:
+        if i % 500 == 499:
             disp_gen_samples( modelGen, modelEval, dp, misc,
                     maxlen=params['max_seq_len'], atoms=params['atoms'],
                     append_tensor=append_tensor_disp)
