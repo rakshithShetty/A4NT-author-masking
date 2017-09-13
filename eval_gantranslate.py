@@ -132,9 +132,12 @@ def main(params):
 
     jc = '' if cp_params.get('atoms','char') == 'char' else ' '
     result = {'docs':[], 'misc':None, 'cp_params':cp_params, 'params': params}
-    c_doc = {'sents':[]}
+    id_to_ix = {}
+    for i,iid in enumerate(dp.splits[params['split']]):
+        result['docs'].append({'sents':[], 'attrib': dp.data['docs'][iid]['attrib'], 'author':dp.data['docs'][iid][dp.athstr]})
+        id_to_ix[iid] = i
 
-    for i, b_data in tqdm(enumerate(dp.iter_sentences(split=params['split'], atoms=cp_params.get('atoms','word'), batch_size = params['batch_size']))):
+    for i, b_data in tqdm(enumerate(dp.iter_sentences_bylen(split=params['split'], atoms=cp_params.get('atoms','word'), batch_size = params['batch_size'], auths = auth_to_ix.keys()))):
         if i > params['num_samples'] and params['num_samples']>0:
             break;
     #for i in xrange(params['num_samples']):
@@ -149,17 +152,17 @@ def main(params):
                 end_c=char_to_ix[endc], maxlen=cp_params['max_seq_len'],
                 auths=auths_inp, cycle_compute=params['show_rev'],
                 append_symb=append_tensor)
-
         eval_out_gt = modelEval.forward_classify(targs, lens=lens, compute_softmax=True)
-        real_aid_out = eval_out_gt[0].data[:, auths_inp[0]]
+        auths_inp = auths_inp.numpy()
+        i_bsz = np.arange(c_bsz)
+        real_aid_out = eval_out_gt[0].data.cpu().numpy()[i_bsz, auths_inp]
 
-        gen_aid_out = outs[0][:, auths_inp[0]]
-        accum_err_eval[auths_inp[0]] += (gen_aid_out>= 0.5).float().sum()
-        accum_err_real[auths_inp[0]] += (real_aid_out>= 0.5).float().sum()
-        accum_count_gen[auths_inp[0]] += c_bsz
-        accum_diff_eval[auths_inp[0]].append(gen_aid_out[0] - real_aid_out[0])
-
+        gen_aid_out = outs[0].cpu().numpy()[i_bsz, auths_inp]
+        np.add.at(accum_err_eval, auths_inp, gen_aid_out >=0.5)
+        np.add.at(accum_err_real, auths_inp, real_aid_out >=0.5)
+        np.add.at(accum_count_gen,auths_inp,1)
         for b in xrange(inps.size()[1]):
+            accum_diff_eval[auths_inp[b]].append(gen_aid_out[b] - real_aid_out[b])
             inpset =  set(inps[:,b].tolist()[:lens[b]]) ; genset = set([c[b] for c in outs[1][:outs[2][b]]]);
             accum_recall_forward[auths_inp[b]] += (float(len(genset & inpset)) / float(len(inpset)))
             accum_prec_forward[auths_inp[b]] += (float(len(genset & inpset)) / float(len(genset)))
@@ -168,14 +171,10 @@ def main(params):
                 revgenset = set([c[b] for c in outs[-2][:outs[-1][b]] ])
                 accum_recall_rev[auths_inp[b]]  += (float(len(revgenset & inpset)) / float(len(inpset)))
                 accum_prec_rev[auths_inp[b]]    += (float(len(revgenset & inpset)) / float(len(revgenset)))
-        for b in xrange(inps.size()[1]):
+
             inp_text = jc.join([ix_to_char[c] for c in targs[:,b] if c in ix_to_char])
             trans_text = jc.join([ix_to_char[c.cpu()[b]] for c in outs[1][:outs[2][b]] if c.cpu()[b] in ix_to_char])
-            c_doc['sents'].append({'sent':inp_text,'score':eval_out_gt[0][b].data.cpu().tolist(), 'trans': trans_text, 'trans_score':outs[0][b].cpu().tolist()})
-        if done:
-            c_doc['attrib'] = b_data[0][-1]['attrib']
-            result['docs'].append(c_doc)
-            c_doc = {'sents':[]}
+            result['docs'][id_to_ix[b_data[0][b]['id']]]['sents'].append({'sent':inp_text,'score':eval_out_gt[0][b].data.cpu().tolist(), 'trans': trans_text, 'trans_score':outs[0][b].cpu().tolist(),'sid':b_data[0][b]['sid'] })
 
         if params['print']:
             print '--------------------------------------------'
@@ -199,6 +198,7 @@ def main(params):
     diff_arr0, diff_arr1 =  np.array(accum_diff_eval[0]), np.array(accum_diff_eval[1])
     print 'Mean difference : translation to %s = %.2f , translation to %s = %.2f '%(ix_to_auth[0], diff_arr0.mean(), ix_to_auth[1], diff_arr1.mean())
     print 'Difference > 0  : translation to %s = %.2f%%, translation to %s = %.2f%% '%(ix_to_auth[0], 100.*(diff_arr0>0).sum()/(1e-5+diff_arr0.shape[0]), ix_to_auth[1], 100.*(diff_arr1>0).sum()/(1e-5+diff_arr1.shape[0]))
+    print 'Difference < 0  : translation to %s = %.2f%%, translation to %s = %.2f%% '%(ix_to_auth[0], 100.*(diff_arr0<0).sum()/(1e-5+diff_arr0.shape[0]), ix_to_auth[1], 100.*(diff_arr1<0).sum()/(1e-5+diff_arr1.shape[0]))
 
     print '\n--------------------------------------------'
     print 'Consistencey with the input text'
@@ -209,6 +209,40 @@ def main(params):
         print '\n'
         print 'Reconstr  text A0- Precision = %.2f, Recall = %.2f'%(accum_prec_rev[0]/accum_count_gen[0], accum_recall_rev[0]/accum_count_gen[0] )
         print 'Reconstr  text A1- Precision = %.2f, Recall = %.2f'%(accum_prec_rev[1]/accum_count_gen[1], accum_recall_rev[1]/accum_count_gen[1] )
+
+    print '\n--------------------------------------------'
+    print 'Document Level Scores' 
+    print '--------------------------------------------'
+    doc_accuracy = np.zeros(len(auth_to_ix)) 
+    doc_accuracy_trans = np.zeros(len(auth_to_ix)) 
+    doc_count = np.zeros(len(auth_to_ix)) 
+    for doc in result['docs']:
+        doc_score_orig = np.array([0.,0.])
+        doc_score_trans = np.array([0.,0.])
+        for st in doc['sents']:
+            doc_score_orig  += np.log(st['score'])
+            doc_score_trans += np.log(st['trans_score'])
+        doc_accuracy[auth_to_ix[doc['author']]] += float(doc_score_orig.argmax() == auth_to_ix[doc['author']])
+        doc_accuracy_trans[auth_to_ix[doc['author']]] += float(doc_score_trans.argmax() == auth_to_ix[doc['author']])
+        doc_count[auth_to_ix[doc['author']]] += 1.
+        
+    print 'Original data'
+    print '-------------'
+    print 'Doc accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (doc_accuracy[0]/doc_count[0]),ix_to_auth[1], (doc_accuracy[1]/doc_count[1]) )
+    fp = doc_count[1]- doc_accuracy[1]
+    recall = doc_accuracy[0]/doc_count[0]
+    precision = doc_accuracy[0]/(doc_accuracy[0]+fp)
+    f1score = 2.*(precision*recall)/(precision+recall)
+    print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
+    print '\nTranslated data'
+    print '-----------------'
+    print 'Doc accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (doc_accuracy_trans[0]/doc_count[0]),ix_to_auth[1], (doc_accuracy_trans[1]/doc_count[1]) )
+    fp = doc_count[1]- doc_accuracy_trans[1]
+    recall = doc_accuracy_trans[0]/doc_count[0]
+    precision = doc_accuracy_trans[0]/(doc_accuracy_trans[0]+fp)
+    f1score = 2.*(precision*recall)/(precision+recall)
+    print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
+
 
     if params['dumpjson']:
        json.dump(result, open(params['dumpjson'],'w'))

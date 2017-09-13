@@ -59,20 +59,23 @@ class DataProvider():
         else:
             raise ValueError('ERROR: Dont know how to do len splitting for this dataset')
 
-        lenHist = defaultdict(int)
-        self.lenMap = defaultdict(list)
-        for iid in self.splits['train']:
-          doc = self.data['docs'][iid]
-          for sid, tkn in enumerate(doc['tokens']):
-            ix = max(min(len(tkn.split()),self.max_len),self.min_len)
-            lenHist[ix] += 1
-            self.lenMap[ix].append((iid,sid))
-        self.min_len = min(lenHist.keys())
+        self.lenMap = {}
+        lenHist = {}
+        for sp in self.splits:
+            self.lenMap[sp] = defaultdict(list)
+            lenHist[sp] = defaultdict(int)
+            for iid in self.splits[sp]:
+              doc = self.data['docs'][iid]
+              for sid, tkn in enumerate(doc['tokens']):
+                ix = max(min(len(tkn.split()),self.max_len),self.min_len)
+                lenHist[sp][ix] += 1
+                self.lenMap[sp][ix].append((iid,sid))
+        self.min_len = min(lenHist['train'].keys())
 
         if not params.get('uniform_len_sample',0):
-            self.lenCdist = np.cumsum(lenHist.values())
+            self.lenCdist = np.cumsum(lenHist['train'].values())
         else:
-            self.lenCdist = np.arange(len(lenHist))+1
+            self.lenCdist = np.arange(len(lenHist['train']))+1
         return
 
     def set_hid_cache(self, idces, hid_state):
@@ -123,6 +126,29 @@ class DataProvider():
                 inp, targ, dead, cur_char_idx = self.get_nextstring_doc(cid, cur_char_idx)
                 batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr]})
                 yield batch, dead
+
+    def iter_sentences_bylen(self, split='train', batch_size=100, atoms='char', auths = None):
+        # Since this is a standalone interation usually run to completion
+        # we want to have a seperate temporary doc pointers here.
+        sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
+        batch = []
+        for i,l in enumerate(self.lenMap[split]):
+            for aid in auths: 
+                for idx in self.lenMap[split][l]:
+                    if self.data['docs'][idx[0]][self.athstr] == aid:
+                        inp, targ = sent_func[atoms](idx[0], sidx=idx[1])
+                        batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][idx[0]][self.athstr], 'id':idx[0], 'attrib':self.data['docs'][idx[0]]['attrib'], 'sid':idx[1]})
+                    if len(batch) == batch_size:
+                        yield batch, False 
+                        batch = []
+                if batch:
+                    yield batch, True
+                    batch = []
+            if batch:
+                yield batch, True
+                batch = []
+        if batch:
+            yield batch, True
 
     def iter_sentences(self, split='train', batch_size=100, atoms='char'):
         # Since this is a standalone interation usually run to completion
@@ -234,12 +260,12 @@ class DataProvider():
             inp = '2'+s
         return inp, targ
 
-    def getRandLen(self):
+    def getRandLen(self, split='train'):
       """ sample image sentence pair from a split """
 
       rn = np.random.randint(0,self.lenCdist[-1])
       for l in xrange(len(self.lenCdist)):
-          if rn < self.lenCdist[l] and (len(self.lenMap[l + self.min_len]) > 0):
+          if rn < self.lenCdist[l] and (len(self.lenMap[split][l + self.min_len]) > 0):
               break
 
       l += self.min_len
@@ -256,7 +282,7 @@ class DataProvider():
   #  batch = [self.sampleImageSentencePairByLen(l) for i in xrange(batch_size)]
   #  return batch,l
     def get_sentence_batch(self, batch_size, split='train', atoms='char', aid=None, sample_by_len = False):
-        allids = self.lenMap[self.getRandLen()] if sample_by_len else self.splits[split]
+        allids = self.lenMap[split][self.getRandLen()] if sample_by_len else self.splits[split]
         if aid:
             allids = [idx for idx in allids if self.data['docs'][idx[0] if sample_by_len else idx][self.athstr] == aid]
 
@@ -300,6 +326,9 @@ class DataProvider():
         sort_idx = np.argsort(lens_arr)[::-1]
         lens_arr = lens_arr[sort_idx]
         auths_arr = np.array(auths, dtype=np.int)[sort_idx]
+        # In place change the list so that batches are in the sorted order
+        batch[:] = [batch[i] for i in sort_idx]
+
 
         for i,j in enumerate(sort_idx):
             inp_seqs_arr[:lens_arr[i], i] = inp_seqs[j]
