@@ -11,6 +11,7 @@ import time
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 """
@@ -34,21 +35,22 @@ class BLSTMEncoder(nn.Module):
                                 bidirectional=True, dropout=self.dpout_model)
 
         # To help find words in glove, undo some transformations
-        for w in word_to_ix.keys():
+        word_to_ix_local = word_to_ix.copy()
+        for w in word_to_ix_local.keys():
             if type(w) != int and '3' in w:
                 idx = w.find('3')
                 if idx < len(w)-1:
                     new_w = w[:idx]+w[idx+1]*3+w[idx+2:]
-                    word_to_ix[new_w] = word_to_ix[w]
-                    ix_to_word[word_to_ix[new_w]] = new_w
-                    #word_to_ix.pop(w)
+                    word_to_ix_local[new_w] = word_to_ix_local[w]
+                    ix_to_word[word_to_ix_local[new_w]] = new_w
+                    #word_to_ix_local.pop(w)
 
-        word_vecs = self.get_glove(word_to_ix)
-        self.emb_layer = nn.Embedding(len(word_to_ix)+1, self.word_emb_dim, padding_idx=0)
+        word_vecs = self.get_glove(word_to_ix_local)
+        self.emb_layer = nn.Embedding(len(ix_to_word)+1, self.word_emb_dim, padding_idx=0)
 
         # Initialize the Embedding Layer with Glove word vecs
         for i in ix_to_word:
-            emb_layer.weight.data[i,:] = torch.FloatTensor(word_vecs[ix_to_word[i]])
+            self.emb_layer.weight.data[i,:] = torch.FloatTensor(word_vecs[ix_to_word[i]])
 
         self.cuda()
 
@@ -226,13 +228,14 @@ class BLSTMEncoder(nn.Module):
                 x = Variable(x).cuda()
             else:
                 x = Variable(x,volatile=True).cuda()
-            emb = self.char_emb(x)
+            emb = self.emb_layer(x)
         else:
             emb = x.view(n_steps*b_sz,-1).mm(self.emb_layer.weight).view(n_steps, b_sz, -1)
 
         packed = pack_padded_sequence(emb, lens)
 
         sent_output = self.enc_lstm(packed)[0]  # seqlen x batch x 2*nhid
+        sent_output = pad_packed_sequence(sent_output)[0]
 
         if self.pool_type == "mean":
             print 'not implemented'
