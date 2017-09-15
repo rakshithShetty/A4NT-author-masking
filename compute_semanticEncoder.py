@@ -30,16 +30,14 @@ def main(params):
         ix_to_auth = saved_model['ix_to_auth']
 
     def process_batch(batch, featstr = 'sent_enc'):
-        inps, _, lens,_ = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=cp_params['max_seq_len'])
+        inps, _, _,lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=cp_params['max_seq_len'])
         enc_out = modelGenEncoder.forward_encode(inps, lens)
         enc_out = enc_out.data.cpu().numpy()
         for i,b in enumerate(batch):
             res['docs'][b['id']]['sents'][b['sid']][featstr] = enc_out[i,:].tolist()
 
-
-
     if params['use_semantic_encoder']:
-        modelGenEncoder = BLSTMEncoder(char_to_ix, ix_to_char, cp_params['glove_path'])
+        modelGenEncoder = BLSTMEncoder(char_to_ix, ix_to_char, params['glove_path'])
         encoderState = torch.load(params['use_semantic_encoder'])
     else:
         modelGenEncoder = CharTranslator(cp_params, encoder_only=True)
@@ -54,16 +52,17 @@ def main(params):
 
     resf = params['resfile']
     res = json.load(open(resf,'r'))
-    bzs = params['batch_size']
+    bsz = params['batch_size']
 
     batch = []
     print ' Processing original text'
     for i in tqdm(xrange(len(res['docs']))):
-        ix = auth_to_ix[doc['author']]
-        for j in xrange(len(res['docs'][i]['sents']))
+        ix = auth_to_ix[res['docs'][i]['author']]
+        for j in xrange(len(res['docs'][i]['sents'])):
             st = res['docs'][i]['sents'][j]['sent'].split()
-            batch.append({'in': st,'targ': st, 'author': self.data['docs'][cid][self.athstr],
-                'id':i, 'sid': j})
+            if len(st) > 0:
+                batch.append({'in': st,'targ': st, 'author': res['docs'][i]['author'],
+                    'id':i, 'sid': j})
             if len(batch) == bsz:
                 process_batch(batch, featstr = 'sent_enc')
                 batch = []
@@ -73,11 +72,12 @@ def main(params):
 
     print 'Processing translated text'
     for i in tqdm(xrange(len(res['docs']))):
-        ix = auth_to_ix[doc['author']]
-        for j in xrange(len(res['docs'][i]['sents']))
+        ix = auth_to_ix[res['docs'][i]['author']]
+        for j in xrange(len(res['docs'][i]['sents'])):
             st = res['docs'][i]['sents'][j]['trans_sent'].split()
-            batch.append({'in': st,'targ': st, 'author': self.data['docs'][cid][self.athstr],
-                'id':i, 'sid': j})
+            if len(st) > 0:
+                batch.append({'in': st,'targ': st, 'author': res['docs'][i]['author'],
+                    'id':i, 'sid': j})
             if len(batch) == bsz:
                 process_batch(batch, featstr = 'trans_enc')
                 batch = []
@@ -97,6 +97,7 @@ if __name__ == "__main__":
   parser.add_argument('-o','--offset', dest='offset', type=int, default=0, help='batch_size to use')
   parser.add_argument('-c','--checkpoint', dest='checkpoint', type=str, default=None, help='generator/GAN checkpoint filename')
   parser.add_argument('-b','--batch_size', dest='batch_size', type=int, default=100, help='generator/GAN checkpoint filename')
+  parser.add_argument('-g','--glove_path', dest='glove_path', type=str, default='data/glove.840B.300d.txt', help='generator/GAN checkpoint filename')
   parser.add_argument('--use_semantic_encoder', dest='use_semantic_encoder', type=str, default=None, help='generator/GAN checkpoint filename')
 
 
