@@ -131,7 +131,7 @@ def main(params):
     accum_prec_rev = np.zeros(len(auth_to_ix))
 
     jc = '' if cp_params.get('atoms','char') == 'char' else ' '
-    result = {'docs':[], 'misc':None, 'cp_params':cp_params, 'params': params}
+    result = {'docs':[], 'misc':{'auth_to_ix':auth_to_ix, 'ix_to_auth':ix_to_auth}, 'cp_params':cp_params, 'params': params}
     id_to_ix = {}
     for i,iid in enumerate(dp.splits[params['split']]):
         result['docs'].append({'sents':[], 'attrib': dp.data['docs'][iid]['attrib'], 'author':dp.data['docs'][iid][dp.athstr]})
@@ -211,11 +211,11 @@ def main(params):
         print 'Reconstr  text A1- Precision = %.2f, Recall = %.2f'%(accum_prec_rev[1]/accum_count_gen[1], accum_recall_rev[1]/accum_count_gen[1] )
 
     print '\n--------------------------------------------'
-    print 'Document Level Scores' 
+    print 'Document Level Scores'
     print '--------------------------------------------'
-    doc_accuracy = np.zeros(len(auth_to_ix)) 
-    doc_accuracy_trans = np.zeros(len(auth_to_ix)) 
-    doc_count = np.zeros(len(auth_to_ix)) 
+    doc_accuracy = np.zeros(len(auth_to_ix))
+    doc_accuracy_trans = np.zeros(len(auth_to_ix))
+    doc_count = np.zeros(len(auth_to_ix))
     for doc in result['docs']:
         doc_score_orig = np.array([0.,0.])
         doc_score_trans = np.array([0.,0.])
@@ -225,7 +225,7 @@ def main(params):
         doc_accuracy[auth_to_ix[doc['author']]] += float(doc_score_orig.argmax() == auth_to_ix[doc['author']])
         doc_accuracy_trans[auth_to_ix[doc['author']]] += float(doc_score_trans.argmax() == auth_to_ix[doc['author']])
         doc_count[auth_to_ix[doc['author']]] += 1.
-        
+
     print 'Original data'
     print '-------------'
     print 'Doc accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (doc_accuracy[0]/doc_count[0]),ix_to_auth[1], (doc_accuracy[1]/doc_count[1]) )
