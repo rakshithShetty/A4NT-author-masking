@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from models.fb_semantic_encoder import BLSTMEncoder
 import torch
+import numpy as np
 
 
 
@@ -28,13 +29,29 @@ def main(params):
         auth_to_ix = saved_model['auth_to_ix']
         ix_to_char = saved_model['ix_to_char']
         ix_to_auth = saved_model['ix_to_auth']
+    del saved_model
 
-    def process_batch(batch, featstr = 'sent_enc'):
+    total_sents = 0.
+    resf = params['resfile']
+    res = json.load(open(resf,'r'))
+    bsz = params['batch_size']
+
+    for doc in res['docs']:
+        for st in doc['sents']:
+            total_sents += 1
+
+    all_feats = np.zeros((2*total_sents, 4096) ,dtype='float16')
+    c_idx = 0
+
+    def process_batch(batch, c_idx , featstr = 'sent_enc'):
         inps, _, _,lens = dp.prepare_data(batch, char_to_ix, auth_to_ix, maxlen=cp_params['max_seq_len'])
         enc_out = modelGenEncoder.forward_encode(inps, lens)
-        enc_out = enc_out.data.cpu().numpy()
+        enc_out = enc_out.data.cpu().numpy().astype('float16')
+        all_feats[c_idx:c_idx+enc_out.shape[0]] = enc_out
         for i,b in enumerate(batch):
-            res['docs'][b['id']]['sents'][b['sid']][featstr] = enc_out[i,:].tolist()
+            res['docs'][b['id']]['sents'][b['sid']][featstr] = c_idx + i 
+        c_idx+= enc_out.shape[0]
+        return c_idx
 
     if params['use_semantic_encoder']:
         modelGenEncoder = BLSTMEncoder(char_to_ix, ix_to_char, params['glove_path'])
@@ -49,10 +66,7 @@ def main(params):
             state[k] = encoderState[k]
     modelGenEncoder.load_state_dict(state)
     modelGenEncoder.eval()
-
-    resf = params['resfile']
-    res = json.load(open(resf,'r'))
-    bsz = params['batch_size']
+    del encoderState
 
     batch = []
     print ' Processing original text'
@@ -64,28 +78,31 @@ def main(params):
                 batch.append({'in': st,'targ': st, 'author': res['docs'][i]['author'],
                     'id':i, 'sid': j})
             if len(batch) == bsz:
-                process_batch(batch, featstr = 'sent_enc')
+                c_idx = process_batch(batch, c_idx, featstr = 'sent_enc')
+                del batch
                 batch = []
     if batch:
-        process_batch(batch, featstr = 'sent_enc')
+        c_idx = process_batch(batch, c_idx, featstr = 'sent_enc')
+        del batch
         batch = []
 
     print 'Processing translated text'
     for i in tqdm(xrange(len(res['docs']))):
         ix = auth_to_ix[res['docs'][i]['author']]
         for j in xrange(len(res['docs'][i]['sents'])):
-            st = res['docs'][i]['sents'][j]['trans_sent'].split()
+            st = res['docs'][i]['sents'][j]['trans'].split()
             if len(st) > 0:
                 batch.append({'in': st,'targ': st, 'author': res['docs'][i]['author'],
                     'id':i, 'sid': j})
             if len(batch) == bsz:
-                process_batch(batch, featstr = 'trans_enc')
+                c_idx = process_batch(batch, c_idx, featstr = 'trans_enc')
                 batch = []
     if batch:
-        process_batch(batch, featstr = 'trans_enc')
+        c_idx = process_batch(batch, c_idx , featstr = 'trans_enc')
         batch = []
 
-    json.dump(res, open(resf+'test','w'))
+    json.dump(res, open(resf,'w'))
+    np.save( '.'.join(resf.split('.')[:-1])+'sememb.npy', all_feats)
 
 
 if __name__ == "__main__":

@@ -134,7 +134,9 @@ def main(params):
     result = {'docs':[], 'misc':{'auth_to_ix':auth_to_ix, 'ix_to_auth':ix_to_auth}, 'cp_params':cp_params, 'params': params}
     id_to_ix = {}
     for i,iid in enumerate(dp.splits[params['split']]):
-        result['docs'].append({'sents':[], 'attrib': dp.data['docs'][iid]['attrib'], 'author':dp.data['docs'][iid][dp.athstr]})
+        result['docs'].append({'sents':[], 'author':dp.data['docs'][iid][dp.athstr]})
+        if 'attrib' in dp.data['docs'][iid]:
+            result['docs'][-1]['attrib'] = dp.data['docs'][iid]['attrib']
         id_to_ix[iid] = i
 
     for i, b_data in tqdm(enumerate(dp.iter_sentences_bylen(split=params['split'], atoms=cp_params.get('atoms','word'), batch_size = params['batch_size'], auths = auth_to_ix.keys()))):

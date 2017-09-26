@@ -309,10 +309,10 @@ def main(params):
         state = modelGen.state_dict()
         state.update(model_gen_state)
         modelGen.load_state_dict(state)
-        if params['cycle_loss_type'] == 'enc' or  params['cycle_loss_type'] == 'noncyc_enc':
-            state = modelGenEncoder.state_dict()
-            state.update({k:v for k,v in model_gen_state.iteritems() if k in state})
-            modelGenEncoder.load_state_dict(state)
+        #if params['cycle_loss_type'] == 'enc' or  params['cycle_loss_type'] == 'noncyc_enc':
+        #    state = modelGenEncoder.state_dict()
+        #    state.update({k:v for k,v in model_gen_state.iteritems() if k in state})
+        #    modelGenEncoder.load_state_dict(state)
     if restore_eval:
         state = modelEval.state_dict()
         state.update(model_eval_state)

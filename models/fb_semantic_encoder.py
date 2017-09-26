@@ -51,6 +51,8 @@ class BLSTMEncoder(nn.Module):
         # Initialize the Embedding Layer with Glove word vecs
         for i in ix_to_word:
             self.emb_layer.weight.data[i,:] = torch.FloatTensor(word_vecs[ix_to_word[i]])
+        del word_vecs
+        del word_to_ix_local
 
         self.cuda()
 
