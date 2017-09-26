@@ -642,10 +642,14 @@ def main(params):
                         loss_aid = FN.binary_cross_entropy_with_logits(gen_aid_out, ones[:gen_aid_out.size(0)],sample_weight, size_average=True)
                     else:
                         loss_aid = (bceLogitloss(gen_aid_out, ones[:gen_aid_out.size(0)])).mean()
-                else:
+                elif params['maximize_entropy']==1:
                     # Compute entropy of the classifier and maximize it
                     p = torch.sigmoid(gen_aid_out)
                     loss_aid = 4.*(p * torch.log(p) + (1.-p) * torch.log(1.-p)).mean()
+                elif params['maximize_entropy']==2:
+                    # Compute entropy of the classifier and maximize it
+                    p = torch.sigmoid(gen_aid_out)
+                    loss_aid = ((1.-p) * torch.log(1.-p)).mean()
                 lossGen = 5*loss_aid
             elif params['wasserstien_loss']:
                 targ_aid = 1 - c_aid
