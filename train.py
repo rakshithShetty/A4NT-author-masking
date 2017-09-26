@@ -67,6 +67,7 @@ def main(params):
         #optim.load_state_dict(saved_model['optimizer'])
 
     total_loss = 0.
+    class_loss = 0.
     start_time = time.time()
     hidden = model.init_hidden(params['batch_size'])
     hidden_zeros = model.init_hidden(params['batch_size'])
@@ -124,7 +125,9 @@ def main(params):
             # for classifier auths is the target
             output, _ = model.forward_classify(targs, hidden, compute_softmax=False, lens=lens)
             targets = Variable(auths).cuda()
-            loss = criterion(output, targets)
+            lossClass = criterion(output, targets)
+            if params['compression_layer']:
+                loss = lossClass + (model.compression_W.weight.norm(p=1,dim=1)).mean()
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -134,6 +137,7 @@ def main(params):
         optim.step()
 
         total_loss += loss.data.cpu().numpy()[0]
+        class_loss += lossClass.data.cpu().numpy()[0]
 
         # Save the hidden states in cache for later use
         if params['randomize_batches']:
@@ -151,11 +155,12 @@ def main(params):
         #if (i % iter_per_epoch == 0) and ((i//iter_per_epoch) >= params['lr_decay_st']):
         if i % params['log_interval'] == 0 and i > 0:
             cur_loss = total_loss / params['log_interval']
+            class_loss = class_loss/ params['log_interval']
             elapsed = time.time() - start_time
             print('| epoch {:3.2f} | {:5d}/{:5d} batches | lr {:02.2e} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 float(i)/iter_per_epoch, i, total_iters, params['learning_rate'],
-                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
+                elapsed * 1000 / args.log_interval, cur_loss, math.exp(class_loss)))
 
             if val_rank >=best_loss:
                 best_loss = val_rank
@@ -175,6 +180,7 @@ def main(params):
                 best_val = val_rank
             start_time = time.time()
             total_loss = 0.
+            class_loss = 0.
 
 
 if __name__ == "__main__":
@@ -198,6 +204,7 @@ if __name__ == "__main__":
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
   parser.add_argument('--bidir', dest='bidir', type=int, default=0, help='Use Mlp layer to do the classification')
+  parser.add_argument('--compression_layer', dest='compression_layer', type=int, default=0, help='Use a compression layer') 
 
   parser.add_argument('--decoder_mlp', dest='decoder_mlp', type=int, default=0, help='Use Mlp layer to do the classification')
   parser.add_argument('--decoder_cnn', dest='decoder_cnn', type=int, default=0, help='Use CNN layer to do the classification')

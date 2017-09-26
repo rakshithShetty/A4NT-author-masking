@@ -6,6 +6,28 @@ from torch import tensor
 from model_utils import packed_mean, packed_add
 import torch.nn.functional as FN
 import numpy as np
+from torch.autograd import Variable, Function
+
+
+class GradEmbMod(Function):
+    def __init__(self):
+        super(GradEmbMod, self).__init__()
+
+    def forward(self, x, weight):
+        b_sz = x.size(1)
+        n_steps = x.size(0)
+        emb_mul = (x.view(n_steps*b_sz,-1).mm(weight).view(n_steps,b_sz, -1))
+        self.save_for_backward(x,weight, emb_mul)
+        return emb_mul
+
+    def backward(self, grad_output):
+        import ipdb;ipdb.set_trace()
+        n_time, b_sz = grad_output.size()[:2]
+        _, topkidx = grad_output.abs().sum(dim=-1).topk(self.topk,dim=0)
+        mask = torch.zeros(n_time, b_sz).cuda().scatter_(0,topkidx, 1.)
+        grad_output.mul_(mask.unsqueeze(-1))
+        return grad_output
+
 
 class CharLstm(nn.Module):
     def __init__(self, params):
@@ -18,10 +40,15 @@ class CharLstm(nn.Module):
         self.hidden_size = params.get('hidden_size',-1)
         self.en_residual = params.get('en_residual_conn',0)
         self.bidir = params.get('bidir',0)
+        self.compression_layer = params.get('compression_layer',0)
 
         # Initialize the model layers
         # Embedding layer
-        self.encoder = nn.Embedding(self.output_size, self.emb_size, padding_idx=0)
+        if self.compression_layer:
+            self.compression_W = nn.Embedding(self.output_size, self.compression_layer)
+            self.encoder = nn.Embedding(self.compression_layer, self.emb_size)
+        else:
+            self.encoder = nn.Embedding(self.output_size, self.emb_size, padding_idx=0)
         self.enc_drop = nn.Dropout(p=params.get('drop_prob_encoder',0.25))
 
         # Lstm Layers
@@ -84,6 +111,12 @@ class CharLstm(nn.Module):
         #self.encoder.weight.data.uniform_(-a, a)
         self.decoder_b.data.fill_(0)
         h_sz = self.hidden_size
+        if self.compression_layer:
+            n_in = np.sqrt(float(self.output_size))
+            #self.compression_W.data.uniform_(0,2.*(1.73/n_in))
+            qn = torch.norm(self.compression_W.weight.data, p=1, dim=1).view(-1,1).expand_as(self.compression_W.weight.data)
+            self.compression_W.weight.data = self.compression_W.weight.data.div(qn)
+
         # LSTM forget gate could be initialized to high value (1.)
         if self.en_residual:
           for i in xrange(self.num_rec_layers):
@@ -239,9 +272,22 @@ class CharLstm(nn.Module):
             else:
                 x = Variable(x).cuda()
 
-            emb = self.enc_drop(self.encoder(x)) if drop else self.encoder(x)
+            if self.compression_layer:
+                compressed_x = self.compression_W(x).view(n_steps*b_sz, -1)
+                qn = torch.norm(compressed_x, p=1, dim=1).view(-1,1).expand_as(compressed_x) + 1e-8
+                enc_x = compressed_x.div(qn).mm(self.encoder.weight).view(n_steps,b_sz, -1)
+            else:
+                enc_x = self.encoder(x)
+
+            emb = self.enc_drop(enc_x) if drop else enc_x 
         else:
-            emb_mul = x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1)
+            if self.compression_layer:
+                compressed_x = x.view(n_steps*b_sz,-1).mm(self.compression_W.weight)
+                qn = torch.norm(compressed_x, p=1, dim=1).view(-1,1).expand_as(compressed_x) + 1e-8
+                emb_mul = compressed_x.div(qn).mm(self.encoder.weight).view(n_steps,b_sz, -1)
+            else:
+                emb_mul = x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1)
+            #emb_mul = GradEmbMod()(x,self.encoder.weight)
             emb = self.enc_drop(emb_mul) if drop else emb_mul
 
         # Pack the sentences as they can be of different lens
