@@ -483,6 +483,9 @@ def main(params):
                 loss_aid = (bceLogitloss(real_aid_out, ones[:real_aid_out.size(0)]) +
                             bceLogitloss(gen_aid_out, zeros[:gen_aid_out.size(0)]))
                 lossEval = loss_aid# + lossEvalGt
+
+                if eval_params.get('compression_layer',0):
+                    lossEval += (modelEval.compression_W.weight.norm(p=1,dim=1)).mean()
                 lossEval.backward()
             elif params['wasserstien_loss']:
                 targ_aid = 1 - c_aid

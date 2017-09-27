@@ -283,7 +283,7 @@ class CharLstm(nn.Module):
         else:
             if self.compression_layer:
                 compressed_x = x.view(n_steps*b_sz,-1).mm(self.compression_W.weight)
-                qn = torch.norm(compressed_x, p=1, dim=1).view(-1,1).expand_as(compressed_x) + 1e-8
+                qn = torch.norm(compressed_x, p=1, dim=1).detach().view(-1,1).expand_as(compressed_x) + 1e-8
                 emb_mul = compressed_x.div(qn).mm(self.encoder.weight).view(n_steps,b_sz, -1)
             else:
                 emb_mul = x.view(n_steps*b_sz,-1).mm(self.encoder.weight).view(n_steps,b_sz, -1)
