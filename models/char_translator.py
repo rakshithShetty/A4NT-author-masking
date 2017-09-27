@@ -196,7 +196,7 @@ class CharTranslator(nn.Module):
                 rnn_out, hidden = rec_func(packed, h_prev)
         return rnn_out, hidden
 
-    def forward_mltrain(self, inp, lengths_inp, targ, lengths_targ, h_prev=None, compute_softmax = False, auths=None, adv_inp=False, sort_enc=None):
+    def forward_mltrain(self, inp, lengths_inp, targ, lengths_targ, h_prev=None, compute_softmax = False, auths=None, adv_inp=False, sort_enc=None, adv_targ=False):
         # x should be a numpy array of n_seq x n_batch dimensions
         b_sz = inp.size(1)
         n_steps = inp.size(0)
@@ -244,8 +244,11 @@ class CharTranslator(nn.Module):
             enc_hidden = None
 
         # Setup target variable now
-        targ = Variable(targ).cuda()
-        targ_emb = self.emb_drop(self.char_emb(targ))
+        if not adv_targ:
+            targ = Variable(targ).cuda()
+            targ_emb = self.emb_drop(self.char_emb(targ))
+        else:
+            emb = targ.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1)
         # Concat the context vector from the encoder
         n_steps_targ = targ.size(0)
 
