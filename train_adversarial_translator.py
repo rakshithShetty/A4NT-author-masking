@@ -273,6 +273,18 @@ def main(params):
         for p in modelGenEncoder.parameters(): # reset requires_grad
             p.requires_grad = False# they are set to False below in modelGen update
 
+    if params['language_loss']:
+        lang_model_cp = torch.load(params['language_model'])
+        langModel = CharTranslator(lang_model_cp['arch'])
+        state = langModel.state_dict()
+        for k in lang_model_cp['state_dict']:
+            if k in state:
+                state[k] =lang_model_cp['state_dict'][k]
+        langModel.load_state_dict(state)
+        langModel.train()
+        for p in langModel.parameters(): # reset requires_grad
+            p.requires_grad = False# they are set to False below in modelGen update
+
     # set to train mode, this activates dropout
     modelGen.train()
     modelEval.train()
@@ -629,6 +641,9 @@ def main(params):
                 cyc_loss = params['cycle_loss_w']*ml_criterion(pack_padded_sequence(rev_ml,lens)[0], rev_mlTarg[0])
             else:
                 cyc_loss = 0.
+
+            if params['language_loss']:
+                langProb = langModel.forward_mltrain(enc_inp, len_sorted.tolist(), enc_inp, len_sorted.tolist(), adv_targ=True)
             #print '\n%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
             ##print '%d Rev : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c[0]] for c in rev_char_outs[:rev_gen_lens[0]]]))
             #print '%d Out : %s --> %s' % (0, misc['ix_to_auth'][1-auths[0]], ' '.join([ix_to_char[c[0]] for c in char_outs[:gen_lens[0]]]))
@@ -892,6 +907,10 @@ if __name__ == "__main__":
     # apply gradient filtering
     parser.add_argument('--ml_update',
                         dest='ml_update', type=int, default=None)
+    parser.add_argument('--language_loss',
+                        dest='language_loss', type=float, default=None)
+    parser.add_argument('--language_model',
+                        dest='language_model', type=str, default=None)
     parser.add_argument('--apply_noise',
                         dest='apply_noise', type=int, default=None)
 

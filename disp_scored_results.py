@@ -25,23 +25,25 @@ def main(params):
     emb_diff = [[],[]]
     if params['semantic_embedding']:
         sem_emb = np.load(params['semantic_embedding'])
+    sc = [[],[]]
 
     for doc in res['docs']:
         ix = auth_to_ix[doc['author']]
         for st in doc['sents']:
             inpset = set(st['sent'].split()[:-1])
-            if len(inpset) > 0:
+            if len(inpset) > 0 and st['score'][1-ix]>params['filter']:
                 genset = set(st['trans'].split()[:-1])
                 recall[ix].append(float(len(inpset & genset))/float(len(inpset)))
                 sents[ix].append(st['sent'])
+                sc[ix].append(st['score'][1-ix])
                 trans_sents[ix].append(st['trans'])
                 diff_sc[ix].append(st['trans_score'][ix] - st['score'][ix])
-                if params['semantic_embedding']: 
+                if params['semantic_embedding']:
                     emb_diff[ix].append(np.abs(sem_emb[st['trans_enc'],:] - sem_emb[st['sent_enc'],:]).sum())
 
     diff_sc = [np.array(diff_sc[0]), np.array(diff_sc[1])]
     recall = [np.array(rc) for rc in recall]
-    if params['semantic_embedding']: 
+    if params['semantic_embedding']:
         emb_diff = [np.array(emb) for emb in emb_diff]
     for j in xrange(2):
         print '\n----------------------------------------------------------'
@@ -49,7 +51,7 @@ def main(params):
         print '----------------------------------------------------------'
         score = diff_sc[j] * recall[j]
         for i in (score).argsort()[params['offset']:params['offset']+params['ndisp']]:
-            if params['semantic_embedding']: 
+            if params['semantic_embedding']:
                 print 'diff %.2f, recall: %.2f, emb_diff: %.2f'%(-diff_sc[j][i],recall[j][i], emb_diff[j][i])
             else:
                 print 'diff %.2f, recall: %.2f'%(-diff_sc[j][i],recall[j][i])
@@ -66,6 +68,7 @@ if __name__ == "__main__":
   parser.add_argument('-a','--age', dest='age', type=int, default=1, help='batch_size to use')
   parser.add_argument('-o','--offset', dest='offset', type=int, default=0, help='batch_size to use')
   parser.add_argument('-s','--semantic_embedding', dest='semantic_embedding', type=str, default=None, help='batch_size to use')
+  parser.add_argument('-f','--filter', dest='filter', type=float, default=0., help='batch_size to use')
 
 
   args = parser.parse_args()
