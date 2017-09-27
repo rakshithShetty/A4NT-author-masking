@@ -274,16 +274,28 @@ def main(params):
             p.requires_grad = False# they are set to False below in modelGen update
 
     if params['language_loss']:
-        lang_model_cp = torch.load(params['language_model'])
-        langModel = CharTranslator(lang_model_cp['arch'])
-        state = langModel.state_dict()
-        for k in lang_model_cp['state_dict']:
-            if k in state:
-                state[k] =lang_model_cp['state_dict'][k]
-        langModel.load_state_dict(state)
-        langModel.train()
-        for p in langModel.parameters(): # reset requires_grad
-            p.requires_grad = False# they are set to False below in modelGen update
+        langModel = [None]*len(params['language_model'])
+        mapVocabToLangModel = [None]*len(params['language_model'])
+        for lmix,lm in enumerate(params['language_model']):
+            lang_model_cp = torch.load(lm)
+            langState = lang_model_cp['state_dict']
+            if lang_model_cp['char_to_ix'] != char_to_ix:
+                orig_chartoix = lang_model_cp['char_to_ix']
+                ix_to_oix = {ix:orig_chartoix[c] if c in orig_chartoix else orig_chartoix['UNK'] for c, ix in char_to_ix.items()}
+                mapVocabToLangModel[lmix] = Variable(torch.cuda.FloatTensor(len(ix_to_oix)+1, len(orig_chartoix)+1).zero_(),requires_grad=False)
+                for i in ix_to_oix:
+                    mapVocabToLangModel[lmix].data[i,ix_to_oix[i]] = 1.
+
+            langModel[lmix] = CharTranslator(lang_model_cp['arch'])
+            state = langModel[lmix].state_dict()
+            for k in langState:
+                if k in state:
+                    state[k] = langState[k]
+            langModel[lmix].load_state_dict(state)
+            langModel[lmix].train()
+            del langState, lang_model_cp, ix_to_oix
+            for p in langModel[lmix].parameters(): # reset requires_grad
+                p.requires_grad = False# they are set to False below in modelGen update
 
     # set to train mode, this activates dropout
     modelGen.train()
@@ -643,7 +655,21 @@ def main(params):
                 cyc_loss = 0.
 
             if params['language_loss']:
-                langProb = langModel.forward_mltrain(enc_inp, len_sorted.tolist(), enc_inp, len_sorted.tolist(), adv_targ=True)
+                gen_samples, gen_lens, char_outs, = outs[2], outs[3], outs[4]
+                len_sorted, gen_lensort_idx = gen_lens.sort(dim=0, descending=True)
+                gen_samples_srt = gen_samples.index_select(1, Variable(gen_lensort_idx, requires_grad=False))
+                enc_inp = torch.cat([append_tensor, gen_samples_srt])
+                n_steps = enc_inp.size(0);b_sz = enc_inp.size(1);
+                targ_aid = 1 - c_aid
+                langModelInp = enc_inp.view(n_steps*b_sz, -1).mm(mapVocabToLangModel[targ_aid]).view(n_steps, b_sz, -1)
+                langProb,_ = langModel[targ_aid].forward_mltrain(langModelInp, len_sorted.tolist(), langModelInp, len_sorted.tolist(), adv_targ=True)
+                langModelTarg = pack_padded_sequence(Variable(langModelInp.data[1:,:,:].max(dim=-1)[1]), len_sorted.tolist())
+                lang_loss = params['language_loss']*ml_criterion(pack_padded_sequence(langProb,len_sorted.tolist())[0], langModelTarg[0])
+                if lang_loss.data[0] >20:
+                    print 'Limiting loss', lang_loss
+                    lang_loss = 0.
+            else:
+                lang_loss = 0.
             #print '\n%d Inp : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c] for c in inps.numpy()[1:, 0] if c in ix_to_char]))
             ##print '%d Rev : %s --> %s' % (0, misc['ix_to_auth'][auths[0]], ' '.join([ix_to_char[c[0]] for c in rev_char_outs[:rev_gen_lens[0]]]))
             #print '%d Out : %s --> %s' % (0, misc['ix_to_auth'][1-auths[0]], ' '.join([ix_to_char[c[0]] for c in char_outs[:gen_lens[0]]]))
@@ -674,7 +700,7 @@ def main(params):
 
             accum_err_eval[targ_aid] += ((gen_aid_out.data > 0.).float().mean())# + (eval_out_gt[0][:,targ_aid].data <= 0.).float().mean())/2.
             accum_count_gen[targ_aid] += 1.
-            lossGenTot = lossGen + cyc_loss + feature_match_loss
+            lossGenTot = lossGen + cyc_loss + feature_match_loss + lang_loss
             #lossGenTot = cyc_loss# +mlLoss #+ lossGen + cyc_loss + feature_match_loss
             lossGenTot.backward()
 
@@ -910,7 +936,7 @@ if __name__ == "__main__":
     parser.add_argument('--language_loss',
                         dest='language_loss', type=float, default=None)
     parser.add_argument('--language_model',
-                        dest='language_model', type=str, default=None)
+                        dest='language_model', type=str, nargs='+',  default=[])
     parser.add_argument('--apply_noise',
                         dest='apply_noise', type=int, default=None)
 

@@ -82,11 +82,12 @@ class CharTranslator(nn.Module):
 
         if not encoder_only:
             # Decoder Lstm Layers
-            input_layer_size = (self.enc_hidden_size*(1+self.max_pool_rnn)+self.emb_size + self.pad_auth_vec)
+            enc_out_size = self.enc_hidden_size*(1+self.max_pool_rnn) if not self.no_encoder else 0
+            input_layer_size = (enc_out_size+self.emb_size + self.pad_auth_vec)
             if self.en_residual:
                 self.dec_rec_layers = nn.ModuleList([nn.LSTM(input_layer_size if i == 0 else self.dec_hidden_size, self.dec_hidden_size, 1) for i in xrange(self.dec_num_rec_layers)])
             else:
-                self.dec_rec_layers = nn.LSTM(self.enc_hidden_size*(1+self.max_pool_rnn)+ self.emb_size+self.pad_auth_vec, self.dec_hidden_size, self.dec_num_rec_layers)
+                self.dec_rec_layers = nn.LSTM(input_layer_size, self.dec_hidden_size, self.dec_num_rec_layers)
 
             # Output decoder layer
             self.decoder_W = nn.Parameter(torch.zeros([self.dec_hidden_size,
@@ -99,7 +100,7 @@ class CharTranslator(nn.Module):
                 if self.en_residual:
                     self.dec_rec_layers_2 = nn.ModuleList([nn.LSTM(input_layer_size if i == 0 else self.dec_hidden_size, self.dec_hidden_size, 1) for i in xrange(self.dec_num_rec_layers)])
                 else:
-                    self.dec_rec_layers_2 = nn.LSTM(self.enc_hidden_size*(1+self.max_pool_rnn)+ self.emb_size+self.pad_auth_vec, self.dec_hidden_size, self.dec_num_rec_layers)
+                    self.dec_rec_layers_2 = nn.LSTM(input_layer_size, self.dec_hidden_size, self.dec_num_rec_layers)
 
                 # Output decoder layer
                 self.decoder_W_2 = nn.Parameter(torch.zeros([self.dec_hidden_size,
@@ -247,10 +248,11 @@ class CharTranslator(nn.Module):
         if not adv_targ:
             targ = Variable(targ).cuda()
             targ_emb = self.emb_drop(self.char_emb(targ))
+            n_steps_targ = targ.size(0)
         else:
-            emb = targ.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1)
+            targ_emb = self.emb_drop(targ.view(n_steps*b_sz,-1).mm(self.char_emb.weight).view(n_steps,b_sz, -1))
+            n_steps_targ = lengths_targ[0]
         # Concat the context vector from the encoder
-        n_steps_targ = targ.size(0)
 
         if not self.no_encoder:
             dec_inp = torch.cat([ctxt_sorted.expand(n_steps_targ,b_sz,ctxt_sorted.size(1)), targ_emb], dim=-1)

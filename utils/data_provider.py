@@ -26,12 +26,19 @@ class DataProvider():
             if params.get('filtertype','keep') == 'keep':
                 keepset = set(params['filterauths'])
                 print 'Keeping only %s'%keepset
-                self.data['docs'] = [doc for doc in self.data['docs'] if doc[self.athstr] in keepset]
+                self.data['docs'] = [doc for doc in self.data['docs'] if str(doc['actage']) in keepset]
             elif params.get('filtertype','keep') == 'agegroup':
                 groupidces = map(int,params['filterauths'])
                 for i,doc in enumerate(self.data['docs']):
                     grp = bisect(groupidces, doc['actage'])
-                    self.data['docs'][i][self.athstr] = '<' + str(groupidces[grp])
+                    self.data['docs'][i][self.athstr] = '<' + str(groupidces[grp]) if grp < len(groupidces) else 'None'
+                self.data['docs'] = [doc for doc in self.data['docs'] if doc[self.athstr] != 'None']
+            elif params.get('filtertype','keep') == 'agegroup-grt':
+                groupidces = map(int,params['filterauths'])
+                for i,doc in enumerate(self.data['docs']):
+                    grp = bisect(groupidces, doc['actage'])
+                    self.data['docs'][i][self.athstr] = '>' + str(groupidces[grp-1]) if grp > 0 else 'None'
+                self.data['docs'] = [doc for doc in self.data['docs'] if doc[self.athstr] != 'None']
 
         self.splits = defaultdict(list)
         for i,dc in enumerate(self.data['docs']):
@@ -133,13 +140,13 @@ class DataProvider():
         sent_func = {'char':self.get_rand_sentence, 'word':self.get_rand_sentence_tokenized}
         batch = []
         for i,l in enumerate(self.lenMap[split]):
-            for aid in auths: 
+            for aid in auths:
                 for idx in self.lenMap[split][l]:
                     if self.data['docs'][idx[0]][self.athstr] == aid:
                         inp, targ = sent_func[atoms](idx[0], sidx=idx[1])
                         batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][idx[0]][self.athstr], 'id':idx[0], 'attrib':self.data['docs'][idx[0]]['attrib'], 'sid':idx[1]})
                     if len(batch) == batch_size:
-                        yield batch, False 
+                        yield batch, False
                         batch = []
                 if batch:
                     yield batch, True
