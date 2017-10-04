@@ -30,6 +30,8 @@ def main(params):
     for doc in res['docs']:
         ix = auth_to_ix[doc['author']]
         for st in doc['sents']:
+            if type(st) == list:
+                st = st[0]
             inpset = set(st['sent'].split()[:-1])
             if len(inpset) > 0 and st['score'][1-ix]>params['filter']:
                 genset = set(st['trans'].split()[:-1])

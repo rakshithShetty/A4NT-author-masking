@@ -17,19 +17,19 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import math
 
 def adv_forward_pass(modelGen, modelEval, inps, lens, end_c=0, maxlen=100, auths=None,
-        cycle_compute=True, append_symb=None):
+        cycle_compute=True, append_symb=None, n_samples = 1):
     modelGen.eval()
     modelEval.eval()
     b_sz = len(lens)
 
-    gen_samples, gen_lens, char_outs = modelGen.forward_advers_gen(inps, lens, end_c=end_c, n_max=maxlen, auths=auths)
+    gen_samples, gen_lens, char_outs = modelGen.forward_advers_gen(inps, lens, end_c=end_c, n_max=maxlen, auths=auths, n_samples=n_samples, soft_samples=(n_samples>1))
 
     len_sorted, gen_lensort_idx = gen_lens.sort(dim=0, descending=True)
     _, rev_sort_idx = gen_lensort_idx.sort(dim=0)
 
     eval_inp = torch.cat([torch.unsqueeze(c,0) for c in char_outs])
     # Apply gradient filtering
-    eval_inp = eval_inp.index_select( 1, gen_lensort_idx)
+    eval_inp = eval_inp.index_select(1, gen_lensort_idx)
 
     #--------------------------------------------------------------------------
     # The output need to be sorted by length to be fed into further LSTM stages
@@ -100,6 +100,9 @@ def main(params):
         ix_to_auth = saved_model['ix_to_auth']
 
     dp = DataProvider(cp_params)
+    if params['softmax_scale']:
+        cp_params['softmax_scale'] = params['softmax_scale']
+
     modelGen = CharTranslator(cp_params)
     modelEval = CharLstm(eval_params)
 
@@ -139,10 +142,12 @@ def main(params):
             result['docs'][-1]['attrib'] = dp.data['docs'][iid]['attrib']
         id_to_ix[iid] = i
 
+
+    n_samp = params['n_samples']
     for i, b_data in tqdm(enumerate(dp.iter_sentences_bylen(split=params['split'], atoms=cp_params.get('atoms','word'), batch_size = params['batch_size'], auths = auth_to_ix.keys()))):
-        if i > params['num_samples'] and params['num_samples']>0:
+        if i > params['num_batches'] and params['num_batches']>0:
             break;
-    #for i in xrange(params['num_samples']):
+    #for i in xrange(params['num_batches']):
         #c_aid = np.random.choice(auth_to_ix.values())
         #batch = dp.get_sentence_batch(1,split=params['split'], atoms=cp_params.get('atoms','char'), aid=ix_to_auth[c_aid])
         c_bsz = len(b_data[0])
@@ -153,30 +158,37 @@ def main(params):
         outs = adv_forward_pass(modelGen, modelEval, inps, lens,
                 end_c=char_to_ix[endc], maxlen=cp_params['max_seq_len'],
                 auths=auths_inp, cycle_compute=params['show_rev'],
-                append_symb=append_tensor)
+                append_symb=append_tensor, n_samples=params['n_samples'])
         eval_out_gt = modelEval.forward_classify(targs, lens=lens, compute_softmax=True)
         auths_inp = auths_inp.numpy()
         i_bsz = np.arange(c_bsz)
         real_aid_out = eval_out_gt[0].data.cpu().numpy()[i_bsz, auths_inp]
 
-        gen_aid_out = outs[0].cpu().numpy()[i_bsz, auths_inp]
-        np.add.at(accum_err_eval, auths_inp, gen_aid_out >=0.5)
+        gen_scores = outs[0].view(n_samp,c_bsz,-1)
+        gen_aid_out = gen_scores.cpu().numpy()[:,i_bsz, auths_inp]
+        gen_char = [v.view(n_samp,c_bsz) for v in outs[1]]
+        gen_lens = outs[2].view(n_samp,c_bsz)
+        np.add.at(accum_err_eval, auths_inp, gen_aid_out[0,:] >=0.5)
         np.add.at(accum_err_real, auths_inp, real_aid_out >=0.5)
         np.add.at(accum_count_gen,auths_inp,1)
         for b in xrange(inps.size()[1]):
-            accum_diff_eval[auths_inp[b]].append(gen_aid_out[b] - real_aid_out[b])
-            inpset =  set(inps[:,b].tolist()[:lens[b]]) ; genset = set([c[b] for c in outs[1][:outs[2][b]]]);
-            accum_recall_forward[auths_inp[b]] += (float(len(genset & inpset)) / float(len(inpset)))
-            accum_prec_forward[auths_inp[b]] += (float(len(genset & inpset)) / float(len(genset)))
+            inpset =  set(inps[:,b].tolist()[:lens[b]]) ;
+            samples = []
+            accum_diff_eval[auths_inp[b]].append(gen_aid_out[0,b] - real_aid_out[b])
+            for si in xrange(n_samp):
+                genset = set([c[si, b] for c in gen_char[:gen_lens[si,b]]]);
+                accum_recall_forward[auths_inp[b]] += (float(len(genset & inpset)) / float(len(inpset)))
+                accum_prec_forward[auths_inp[b]] += (float(len(genset & inpset)) / float(len(genset)))
 
-            if params['show_rev']:
-                revgenset = set([c[b] for c in outs[-2][:outs[-1][b]] ])
-                accum_recall_rev[auths_inp[b]]  += (float(len(revgenset & inpset)) / float(len(inpset)))
-                accum_prec_rev[auths_inp[b]]    += (float(len(revgenset & inpset)) / float(len(revgenset)))
+                if params['show_rev']:
+                    revgenset = set([c[b] for c in outs[-2][:outs[-1][b]] ])
+                    accum_recall_rev[auths_inp[b]]  += (float(len(revgenset & inpset)) / float(len(inpset)))
+                    accum_prec_rev[auths_inp[b]]    += (float(len(revgenset & inpset)) / float(len(revgenset)))
 
-            inp_text = jc.join([ix_to_char[c] for c in targs[:,b] if c in ix_to_char])
-            trans_text = jc.join([ix_to_char[c.cpu()[b]] for c in outs[1][:outs[2][b]] if c.cpu()[b] in ix_to_char])
-            result['docs'][id_to_ix[b_data[0][b]['id']]]['sents'].append({'sent':inp_text,'score':eval_out_gt[0][b].data.cpu().tolist(), 'trans': trans_text, 'trans_score':outs[0][b].cpu().tolist(),'sid':b_data[0][b]['sid'] })
+                inp_text = jc.join([ix_to_char[c] for c in targs[:,b] if c in ix_to_char])
+                trans_text = jc.join([ix_to_char[c.cpu()[si,b]] for c in gen_char[:gen_lens[si,b]] if c.cpu()[si,b] in ix_to_char])
+                samples.append({'sent':inp_text,'score':eval_out_gt[0][b].data.cpu().tolist(), 'trans': trans_text, 'trans_score':gen_scores[si,b].cpu().tolist(),'sid':b_data[0][b]['sid']})
+            result['docs'][id_to_ix[b_data[0][b]['id']]]['sents'].append(samples)
 
         if params['print']:
             print '--------------------------------------------'
@@ -186,7 +198,7 @@ def main(params):
             if params['show_rev']:
                 print 'Rev text %s: '%(ix_to_auth[auths[0]])+ '%s'%(jc.join([ix_to_char[c.cpu()[0]] for c in outs[-2] if c.cpu()[0] in ix_to_char]))
         #else:
-        #    print '%d/%d\r'%(i, params['num_samples']),
+        #    print '%d/%d\r'%(i, params['num_batches']),
 
     err_a1, err_a2 = accum_err_eval[0]/(1e-5+accum_count_gen[0]), accum_err_eval[1]/(1e-5+accum_count_gen[1])
     err_real_a1, err_real_a2 = accum_err_real[0]/(1e-5+accum_count_gen[0]), accum_err_real[1]/(1e-5+accum_count_gen[1])
@@ -222,8 +234,8 @@ def main(params):
         doc_score_orig = np.array([0.,0.])
         doc_score_trans = np.array([0.,0.])
         for st in doc['sents']:
-            doc_score_orig  += np.log(st['score'])
-            doc_score_trans += np.log(st['trans_score'])
+            doc_score_orig  += np.log(st[0]['score'])
+            doc_score_trans += np.log(st[0]['trans_score'])
         doc_accuracy[auth_to_ix[doc['author']]] += float(doc_score_orig.argmax() == auth_to_ix[doc['author']])
         doc_accuracy_trans[auth_to_ix[doc['author']]] += float(doc_score_trans.argmax() == auth_to_ix[doc['author']])
         doc_count[auth_to_ix[doc['author']]] += 1.
@@ -257,7 +269,8 @@ if __name__ == "__main__":
   parser.add_argument('-e','--evalmodel', dest='evalmodel', type=str, default=None, help='evakcheckpoint filename')
   parser.add_argument('-s','--split', dest='split', type=str, default='val', help='which split to evaluate')
   parser.add_argument('-b','--batch_size', dest='batch_size', type=int, default=1, help='batch_size to use')
-  parser.add_argument('--num_samples', dest='num_samples', type=int, default=0, help='how many strings to generate')
+  parser.add_argument('--num_batches', dest='num_batches', type=int, default=0, help='how many strings to generate')
+  parser.add_argument('--n_samples', dest='n_samples', type=int, default=0, help='how many samples per sentence')
   parser.add_argument('--show_rev', dest='show_rev', type=int, default=0, help='how many strings to generate')
   parser.add_argument('-l','--max_len', dest='max_len', type=int, default=100, help='how many characters to generate per string')
   parser.add_argument('--seed_length', dest='seed_length', type=int, default=100, help='character length of seed to the generator')
@@ -266,6 +279,8 @@ if __name__ == "__main__":
   parser.add_argument('--flip', dest='flip', type=int, default=0, help='flip authors')
   parser.add_argument('--print', dest='print', type=int, default=0, help='Print scores')
   parser.add_argument('--dumpjson', dest='dumpjson', type=str, default=None, help='Print scores')
+
+  parser.add_argument('--softmax_scale', dest='softmax_scale', type=int, default=None, help='how many samples per sentence')
 
 
   args = parser.parse_args()

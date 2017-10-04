@@ -311,7 +311,7 @@ class CharTranslator(nn.Module):
             ctxt = enc_hidden[0][-1]
         return ctxt
 
-    def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None, adv_inp=False):
+    def forward_advers_gen(self, x, lengths_inp, h_prev=None, n_max = 100, end_c = -1, soft_samples=False, temp=0.1, auths=None, adv_inp=False, n_samples=1):
         # Sample n_max characters give the hidden state and initial seed x.  Seed should have
         # atleast one character (eg. begin doc char), h_prev can be zeros. x is assumed to be
         # n_steps x 1 dimensional, i.e only one sample string generation at a time. Generation is
@@ -350,30 +350,32 @@ class CharTranslator(nn.Module):
         else:
             targ_emb = x[0,:,:].mm(self.char_emb.weight)
 
-        dec_inp = torch.cat([ctxt, targ_emb], dim=-1)
+        dec_inp = torch.cat([ctxt, targ_emb], dim=-1).repeat(n_samples,1)
 
-        h_prev_dec = None if b_sz != self.zero_hidden_bsz else self.zero_hidden_dec
+        dec_bsz = b_sz * n_samples
+
+        h_prev_dec = None if dec_bsz != self.zero_hidden_bsz else self.zero_hidden_dec
         # Decode the output sequence using encoder state
         dec_rec_func = self.dec_rec_layers if not self.split_gen or auths[0] == 0 else self.dec_rec_layers_2
-        dec_rnn_out, dec_hidden = self._my_recurrent_layer(dec_inp.view(1,b_sz,-1), h_prev=h_prev_dec, rec_func = dec_rec_func,
+        dec_rnn_out, dec_hidden = self._my_recurrent_layer(dec_inp.view(1,dec_bsz,-1), h_prev=h_prev_dec, rec_func = dec_rec_func,
                 n_layers = self.dec_num_rec_layers)
 
         # implement the multi-headed RNN.
         W = self.decoder_W if not self.split_gen or auths[0] == 0 else self.decoder_W_2
         # reshape and expand b to size (batch*n_steps*vocab_size)
         decoder_b = self.decoder_b if not self.split_gen or auths[0] == 0 else self.decoder_b_2
-        b = decoder_b.view(1, self.vocab_size).expand(b_sz, self.vocab_size)
+        b = decoder_b.view(1, self.vocab_size).expand(dec_bsz, self.vocab_size)
 
-        p_rnn = dec_rnn_out.view(b_sz,-1)
+        p_rnn = dec_rnn_out.view(dec_bsz,-1)
         char_out = []
         samp_out = []
-        gen_lens = torch.cuda.IntTensor(b_sz).zero_()
-        prev_done = torch.cuda.ByteTensor(b_sz).zero_()
+        gen_lens = torch.cuda.IntTensor(dec_bsz).zero_()
+        prev_done = torch.cuda.ByteTensor(dec_bsz).zero_()
 
         for i in xrange(n_max):
             # output is size seq * batch_size * vocab
             dec_out = p_rnn.mm(W) + b
-            if  soft_samples:
+            if soft_samples:
                 self.temp = (FN.softplus(p_rnn.mm(self.gumbel_W)+self.gumbel_b) + 1.) if self.learn_gumbel else temp
                 samp = gumbel_softmax_sample(dec_out*self.softmax_scale, self.temp, hard=self.gumb_type)
                 emb = samp.mm(self.char_emb.weight)
@@ -392,9 +394,9 @@ class CharTranslator(nn.Module):
                 break
             else:
                 # No need for any packing here
-                dec_inp = torch.cat([ctxt.view(1,b_sz, -1), emb.view(1,b_sz, -1)], dim=-1)
+                dec_inp = torch.cat([ctxt.repeat(n_samples,1).view(1,dec_bsz, -1), emb.view(1,dec_bsz, -1)], dim=-1)
                 p_rnn, dec_hidden = self._my_recurrent_layer(dec_inp, h_prev=dec_hidden, rec_func = dec_rec_func, n_layers = self.dec_num_rec_layers)
-                p_rnn = p_rnn.view(b_sz, -1)
+                p_rnn = p_rnn.view(dec_bsz, -1)
 
         return samp_out, gen_lens, char_out
 
