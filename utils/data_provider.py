@@ -26,7 +26,7 @@ class DataProvider():
             if params.get('filtertype','keep') == 'keep':
                 keepset = set(params['filterauths'])
                 print 'Keeping only %s'%keepset
-                self.data['docs'] = [doc for doc in self.data['docs'] if str(doc['actage']) in keepset]
+                self.data['docs'] = [doc for doc in self.data['docs'] if str(doc[self.athstr]) in keepset]
             elif params.get('filtertype','keep') == 'agegroup':
                 groupidces = map(int,params['filterauths'])
                 for i,doc in enumerate(self.data['docs']):
