@@ -43,8 +43,14 @@ def main(params):
         doc_score_orig = np.array([0.,0.])
         doc_score_trans = np.array([0.,0.])
         for st in doc['sents']:
-            doc_score_orig  += np.log(st['score'])
-            doc_score_trans += np.log(st['trans_score'])
+            if type(st) == list:
+                all_m_scr = np.array([sent[params['max']] for sent in st])
+                m_idx = all_m_scr.argmax()
+                doc_score_orig  += np.log(st[m_idx]['score'])
+                doc_score_trans += np.log(st[m_idx]['trans_score'])
+            else:
+                doc_score_orig  += np.log(st['score'])
+                doc_score_trans += np.log(st['trans_score'])
         doc_accuracy[auth_to_ix[doc['author']]] += float(doc_score_orig.argmax() == auth_to_ix[doc['author']])
         doc_accuracy_trans[auth_to_ix[doc['author']]] += float(doc_score_trans.argmax() == auth_to_ix[doc['author']])
         doc_count[auth_to_ix[doc['author']]] += 1.
@@ -70,6 +76,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument('inputCands', type=str, help='the input candidateJson')
+  parser.add_argument('--max', type=str, default='meteor',help='the input candidateJson')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict
