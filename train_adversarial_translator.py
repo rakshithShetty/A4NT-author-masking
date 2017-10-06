@@ -693,7 +693,7 @@ def main(params):
                 elif params['maximize_entropy']==2:
                     # Compute entropy of the classifier and maximize it
                     p = torch.sigmoid(gen_aid_out)
-                    loss_aid = ((1.-p) * torch.log(1.-p)).mean()
+                    loss_aid = ((1.-p) * torch.log(1.2*(1.-p))).mean()
                 lossGen = 5*loss_aid
             elif params['wasserstien_loss']:
                 targ_aid = 1 - c_aid
