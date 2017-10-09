@@ -20,6 +20,7 @@ import math
 import time
 import cProfile, pstats, io
 #from graphvisualize import make_dot
+import gc
 
 class GradFilter(Function):
     def __init__(self, topk=1):
@@ -327,7 +328,6 @@ def main(params):
 
     GradFilterLayer = GradFilter(params['gradient_filter']) if params['gradient_filter'] else None
 
-
     # Restore saved checkpoint
     if restore_gen:
         state = modelGen.state_dict()
@@ -344,6 +344,9 @@ def main(params):
     if restore_optim:
         optimGen.load_state_dict(saved_model['gen_optimizer'])
         optimEval.load_state_dict(saved_model['eval_optimizer'])
+
+    del saved_model, state
+    gc.collect()
 
     avg_acc_geneval = 0.
     avg_cyc_loss = 0.
@@ -398,8 +401,8 @@ def main(params):
 
     disp_gen_samples(modelGen, modelEval, dp, misc,
                      maxlen=params['max_seq_len'], atoms=params['atoms'], append_tensor=append_tensor_disp)
-    ones = Variable(torch.ones(params['batch_size'])).cuda()
-    zeros = Variable(torch.zeros(params['batch_size'])).cuda()
+    ones = Variable(torch.ones(params['batch_size']).long()).cuda()
+    zeros = Variable(torch.zeros(params['batch_size']).long()).cuda()
     one = torch.FloatTensor([1]).cuda()
     mone = one * -1
     print total_iters
@@ -480,9 +483,14 @@ def main(params):
                 real_aid_out = eval_out_gt[0][:, targ_aid]
                 # TODO: This needs fix when there are more than one author
                 gen_aid_out = outs[0][:, targ_aid]
-                loss_aid = (bceLogitloss(real_aid_out, ones[:real_aid_out.size(0)]) +
-                            bceLogitloss(gen_aid_out, zeros[:gen_aid_out.size(0)]))
-                lossEval = loss_aid# + lossEvalGt
+                if params['maximize_entropy'] == 0:
+                    loss_aid = (bceLogitloss(real_aid_out, ones[:real_aid_out.size(0)]) +
+                                bceLogitloss(gen_aid_out, zeros[:gen_aid_out.size(0)]))
+                    lossEval = loss_aid# + lossEvalGt
+                else:
+                    loss_aid = (eval_criterion(eval_out_gt[0], ones[:real_aid_out.size(0)] - c_aid) +
+                                eval_criterion(outs[0], ones[:gen_aid_out.size(0)] - targ_aid))
+                    lossEval = loss_aid# + lossEvalGt
 
                 if eval_params.get('compression_layer',0):
                     lossEval += (modelEval.compression_W.weight.norm(p=1,dim=1)).mean()
@@ -692,8 +700,14 @@ def main(params):
                     loss_aid = 4.*(p * torch.log(p) + (1.-p) * torch.log(1.-p)).mean()
                 elif params['maximize_entropy']==2:
                     # Compute entropy of the classifier and maximize it
-                    p = torch.sigmoid(gen_aid_out)
-                    loss_aid = ((1.-p) * torch.log(1.2*(1.-p))).mean()
+                    p = FN.softmax(outs[0])[:,targ_aid]
+                    loss_aid = 4.*((1.-p) * torch.log(1.2*(1.-p))).mean()
+                elif params['maximize_entropy']==3:
+                    # Compute entropy of the classifier and maximize it
+                    p = FN.softmax(outs[0])[:,targ_aid]
+                    slp=0.7; b1=0.6; b2=0.7
+                    pdet = p.detach()
+                    loss_aid =  (-torch.log(p)*(pdet<b1).float()+float(-np.log(b1))*(pdet>=b1).float() +slp*(p-b2)*(pdet>=b2).float()).mean()
                 lossGen = 5*loss_aid
             elif params['wasserstien_loss']:
                 targ_aid = 1 - c_aid
@@ -732,6 +746,7 @@ def main(params):
             err_a1, err_a2 = accum_err_eval[0]/(accum_count_gen[0]+1e-6), accum_err_eval[1]/(accum_count_gen[1]+1e-6)
 
         if i % params['log_interval'] == (params['log_interval'] - 1):
+            gc.collect()
             interv = params['log_interval']
             lossGcyc = avg_cyc_loss / interv
             lossGfeat = avg_feat_loss / interv

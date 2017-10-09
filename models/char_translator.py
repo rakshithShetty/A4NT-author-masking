@@ -169,8 +169,8 @@ class CharTranslator(nn.Module):
     def init_hidden_dec(self, bsz):
         # Weight initializations for various parts.
         weight = next(self.parameters()).data
-        return (Variable(weight.new(self.dec_num_rec_layers, bsz, self.dec_hidden_size).zero_()),
-                    Variable(weight.new(self.dec_num_rec_layers, bsz, self.dec_hidden_size).zero_()))
+        return (Variable(weight.new(self.dec_num_rec_layers, bsz, self.dec_hidden_size).zero_()).detach(),
+                    Variable(weight.new(self.dec_num_rec_layers, bsz, self.dec_hidden_size).zero_()).detach())
 
     def _my_recurrent_layer(self, packed, h_prev=None, rec_func=None, n_layers=1.):
         if self.en_residual:
