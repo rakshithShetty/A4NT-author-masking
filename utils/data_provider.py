@@ -144,7 +144,9 @@ class DataProvider():
                 for idx in self.lenMap[split][l]:
                     if self.data['docs'][idx[0]][self.athstr] == aid:
                         inp, targ = sent_func[atoms](idx[0], sidx=idx[1])
-                        batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][idx[0]][self.athstr], 'id':idx[0], 'attrib':self.data['docs'][idx[0]]['attrib'], 'sid':idx[1]})
+                        batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][idx[0]][self.athstr], 'id':idx[0], 'sid':idx[1]})
+                        if 'attrib' in self.data['docs'][idx[0]]:
+                            batch[-1]['attrib'] = self.data['docs'][idx[0]]['attrib']
                     if len(batch) == batch_size:
                         yield batch, False
                         batch = []
@@ -167,7 +169,9 @@ class DataProvider():
         for i,cid in enumerate(self.splits[split]):
             for j in xrange(self.get_num_sent_doc(cid, atoms=atoms)):
                 inp, targ = sent_func[atoms](cid, sidx=j)
-                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr], 'id':cid, 'attrib':self.data['docs'][cid]['attrib']})
+                batch.append({'in':inp,'targ': targ, 'author': self.data['docs'][cid][self.athstr], 'id':cid, 'sid':j})
+                if 'attrib' in self.data['docs'][cid]:
+                    batch[-1]['attrib'] = self.data['docs'][cid]['attrib']
                 if len(batch) == batch_size:
                     yield batch, j == (self.get_num_sent_doc(cid,atoms=atoms)-1)
                     batch = []

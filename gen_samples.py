@@ -76,6 +76,8 @@ def main(params):
         ix_to_char = saved_model['ix_to_char']
         ix_to_auth = saved_model['ix_to_auth']
     cp_params = saved_model['arch']
+    if params['softmax_scale']:
+        cp_params['softmax_scale'] = params['softmax_scale']
 
     dp = DataProvider(cp_params)
 
@@ -134,6 +136,7 @@ if __name__ == "__main__":
   parser.add_argument('--m_type', dest='m_type', type=str, default='generative', help='type')
   parser.add_argument('--flip', dest='flip', type=int, default=0, help='flip authors')
 
+  parser.add_argument('--softmax_scale', dest='softmax_scale', type=int, default=None, help='how many samples per sentence')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict

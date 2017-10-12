@@ -135,7 +135,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
         # Accumulate the scores for each doc.
         current_doc_score = current_doc_score + scores.sum(axis=0)
         if dump_scores:
-            all_window_scores[n_docs]['scores'].append(scores)
+            all_window_scores[n_docs]['scores'].append({'score':scores,'sid':[btch['sid'] for btch in b_data[0]]})
 
         if done:
             correct = correct + (current_doc_score.argmax() == auths[0])
