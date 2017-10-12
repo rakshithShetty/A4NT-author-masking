@@ -3,6 +3,28 @@ import json
 import time
 from collections import defaultdict
 import numpy as np
+def get_sentence(st, metric='METEOR', method='max', m_idx = None):
+    if m_idx == None and metric !=None:
+        all_m_scr = np.array([sent[metric] for sent in st])
+        if method == 'max':
+            m_idx = all_m_scr.argmax()
+        elif method == 'min':
+            m_idx = all_m_scr.argmin()
+        elif method == 'rand':
+            m_idx = np.random.choice(len(all_m_scr),1)
+        else:
+            m_idx = int(metric)
+    elif metric == None:
+        m_idx = 0
+    st = st[m_idx]
+    return st,m_idx
+
+def main(params):
+    resf = params['resfile']
+    res = json.load(open(resf,'r'))
+    if 'misc' not in res:
+        if params['age']:
+            auth_to_ix = {'<50':0,'<20':1}
 
 def main(params):
     res= json.load(open(params['inputCands'],'r'))
@@ -39,30 +61,29 @@ def main(params):
     doc_accuracy = np.zeros(len(auth_to_ix))
     doc_accuracy_trans = np.zeros(len(auth_to_ix))
     doc_count = np.zeros(len(auth_to_ix))
+
+    sent_accuracy = np.zeros(len(auth_to_ix))
+    sent_accuracy_trans = np.zeros(len(auth_to_ix))
+    sent_count = np.zeros(len(auth_to_ix))
     meteor_score = []
     for doc in res['docs']:
         doc_score_orig = np.array([0.,0.])
         doc_score_trans = np.array([0.,0.])
         for st in doc['sents']:
             if type(st) == list:
-                all_m_scr = np.array([sent[params['filter_score']] for sent in st])
-                if params['filter_by'] == 'max':
-                    m_idx = all_m_scr.argmax()
-                elif params['filter_by'] == 'min':
-                    m_idx = all_m_scr.argmin()
-                elif params['filter_by'] == 'rand':
-                    m_idx = np.random.choice(len(all_m_scr),1)
-                else:
-                    m_idx = int(params['filter_by'])
-
-                meteor_score.append(all_m_scr[m_idx])
-                doc_score_orig  += np.log(st[m_idx]['score'])
-                doc_score_trans += np.log(st[m_idx]['trans_score'])
-            else:
-                doc_score_orig  += np.log(st['score'])
-                doc_score_trans += np.log(st['trans_score'])
+                st, m_idx = get_sentence(st,params['filter_score'], params['filter_by'])
                 if params['filter_score']:
                     meteor_score.append(st[params['filter_score']])
+
+            scr = np.log(st['score'])
+            trans_scr = np.log(st['trans_score'])
+
+            sent_accuracy[auth_to_ix[doc['author']]] +=float(scr.argmax() == auth_to_ix[doc['author']])
+            sent_accuracy_trans[auth_to_ix[doc['author']]] += float(trans_scr.argmax() == auth_to_ix[doc['author']])
+            sent_count[auth_to_ix[doc['author']]] += 1.
+
+            doc_score_orig  += scr
+            doc_score_trans += trans_scr
         doc_accuracy[auth_to_ix[doc['author']]] += float(doc_score_orig.argmax() == auth_to_ix[doc['author']])
         doc_accuracy_trans[auth_to_ix[doc['author']]] += float(doc_score_trans.argmax() == auth_to_ix[doc['author']])
         doc_count[auth_to_ix[doc['author']]] += 1.
@@ -77,12 +98,29 @@ def main(params):
     precision = doc_accuracy[0]/(doc_accuracy[0]+fp)
     f1score = 2.*(precision*recall)/(precision+recall)
     print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
-    print '\nTranslated data'
+
+    print '-----------------'
+    print 'Sent accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (sent_accuracy[0]/sent_count[0]),ix_to_auth[1], (sent_accuracy[1]/sent_count[1]) )
+    fp = sent_count[1]- sent_accuracy[1]
+    recall = sent_accuracy[0]/sent_count[0]
+    precision = sent_accuracy[0]/(sent_accuracy[0]+fp)
+    f1score = 2.*(precision*recall)/(precision+recall)
+    print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
+
+    print '\n-----------------'
+    print 'Translated data'
     print '-----------------'
     print 'Doc accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (doc_accuracy_trans[0]/doc_count[0]),ix_to_auth[1], (doc_accuracy_trans[1]/doc_count[1]) )
     fp = doc_count[1]- doc_accuracy_trans[1]
     recall = doc_accuracy_trans[0]/doc_count[0]
     precision = doc_accuracy_trans[0]/(doc_accuracy_trans[0]+fp)
+    f1score = 2.*(precision*recall)/(precision+recall)
+    print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
+    print '-----------------'
+    print 'Sent accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (sent_accuracy_trans[0]/sent_count[0]),ix_to_auth[1], (sent_accuracy_trans[1]/sent_count[1]) )
+    fp = sent_count[1]- sent_accuracy_trans[1]
+    recall = sent_accuracy_trans[0]/sent_count[0]
+    precision = sent_accuracy_trans[0]/(sent_accuracy_trans[0]+fp)
     f1score = 2.*(precision*recall)/(precision+recall)
     print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
 
