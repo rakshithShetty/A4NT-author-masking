@@ -401,8 +401,8 @@ def main(params):
 
     disp_gen_samples(modelGen, modelEval, dp, misc,
                      maxlen=params['max_seq_len'], atoms=params['atoms'], append_tensor=append_tensor_disp)
-    ones = Variable(torch.ones(params['batch_size']).long()).cuda()
-    zeros = Variable(torch.zeros(params['batch_size']).long()).cuda()
+    ones = Variable(torch.ones(params['batch_size'])).cuda()
+    zeros = Variable(torch.zeros(params['batch_size'])).cuda()
     one = torch.FloatTensor([1]).cuda()
     mone = one * -1
     print total_iters
