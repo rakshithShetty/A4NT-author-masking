@@ -49,11 +49,11 @@ def main(params):
                     batch.append({'in': st,'targ': st, 'author': inps['docs'][i]['author'],
                         'id':i, 'sid': j, 'sampid':k})
                 if len(batch) == bsz:
-                    process_batch(batch, featstr = 'trans_score')
+                    process_batch(batch, featstr = params['store_in'])
                     del batch
                     batch = []
     if batch:
-        process_batch(batch, featstr = 'trans_score')
+        process_batch(batch, featstr = params['store_in'])
         del batch
         batch = []
     json.dump(inps, open(params['inpfile'],'w'))
@@ -63,6 +63,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('-e','--evalmodel', dest='evalmodel', type=str, default=None, help='evakcheckpoint filename')
   parser.add_argument('-i','--inpfile', dest='inpfile', type=str, default=None, help='evakcheckpoint filename')
+  parser.add_argument('--store_in', dest='store_in', type=str, default='trans_score', help='evakcheckpoint filename')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict
