@@ -177,9 +177,9 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
 
     for i in xrange(n_auths):
         print 'Block level accuracy of class %s is %.2f.'%(ix_to_auth[i], 100. * (correct_textblock_perclass[i]/block_perclass[i]))
-    fp = correct_textblock_perclass[1]- block_perclass[1]
+    fp = block_perclass[1]-correct_textblock_perclass[1]
     recall = correct_textblock_perclass[0]/block_perclass[0]
-    precision = correct_textblock_perclass[0]/(block_perclass[0]+fp)
+    precision = correct_textblock_perclass[0]/(correct_textblock_perclass[0]+fp)
     f1score = 2.*(precision*recall)/(precision+recall)
     print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
 
