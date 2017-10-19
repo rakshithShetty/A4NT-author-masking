@@ -112,6 +112,8 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
     block_perclass = np.zeros(n_auths)
     correct_textblock_topk = 0.
     n_blks = 0.
+    doc_count = np.zeros(n_auths)
+    doc_correct = np.zeros(n_auths)
     for i, b_data in tqdm(enumerate(dp.iter_sentences(split=split, atoms=params.get('atoms','char'), batch_size = b_sz))):
     #for i, b_data in tqdm(enumerate(dp.iter_single_doc(split=split, max_docs=max_docs))):
         if len(b_data[0]) != b_sz or len(b_data[0]) != c_sz:
@@ -139,6 +141,8 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
 
         if done:
             correct = correct + (current_doc_score.argmax() == auths[0])
+            doc_correct[auths[0]] += (current_doc_score.argmax() == auths[0])
+            doc_count[auths[0]] += 1.
             mean_rank = mean_rank + np.where(current_doc_score.argsort()[::-1]==auths[0])[0][0]
             correct_topk += (np.where(current_doc_score.argsort()[::-1]==auths[0])[0][0]<=params.get('topk',5)).sum()
             mean_corr_prob = mean_corr_prob + current_doc_score[auths[0]]
@@ -160,13 +164,27 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
     doc_acc = (100. * (correct/n_docs))
     print 'Eval on %.1f docs of %s set is done'%(n_docs, split)
     print 'Doc level accuracy is %.3f., mean rank is %.2f '%(100. * (correct/n_docs), mean_rank/n_docs)
+    fp = doc_count[1]- doc_correct[1]
+    recall = doc_correct[0]/doc_count[0]
+    precision = doc_correct[0]/(doc_correct[0]+fp)
+    f1score = 2.*(precision*recall)/(precision+recall)
+    print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
+
     print 'Top-%d Accuracy is %.2f'%(params.get('topk',5), 100.*(correct_topk/n_docs))
+    print ''
     print 'Block level accuracy is %.3f.'%(100. * (correct_textblock/n_blks))
     print 'Top-%d Block Accuracy is %.2f'%(params.get('topk',5), 100. *(correct_textblock_topk/n_blks))
 
     for i in xrange(n_auths):
         print 'Block level accuracy of class %s is %.2f.'%(ix_to_auth[i], 100. * (correct_textblock_perclass[i]/block_perclass[i]))
+    fp = correct_textblock_perclass[1]- block_perclass[1]
+    recall = correct_textblock_perclass[0]/block_perclass[0]
+    precision = correct_textblock_perclass[0]/(block_perclass[0]+fp)
+    f1score = 2.*(precision*recall)/(precision+recall)
+    print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
 
+
+    print ''
     print 'Corr is %.2f | Max is %.2f | Min is %.2f'%(mean_corr_prob/n_docs, mean_max_prob/n_docs, mean_min_prob/n_docs)
     print '-----------------------------------'
 
