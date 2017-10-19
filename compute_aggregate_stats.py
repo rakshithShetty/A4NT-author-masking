@@ -76,7 +76,7 @@ def main(params):
                     meteor_score.append(st[params['filter_score']])
 
             scr = np.log(st['score'])
-            trans_scr = np.log(st['trans_score'])
+            trans_scr = np.log(st[params['use_score']])
 
             sent_accuracy[auth_to_ix[doc['author']]] +=float(scr.argmax() == auth_to_ix[doc['author']])
             sent_accuracy_trans[auth_to_ix[doc['author']]] += float(trans_scr.argmax() == auth_to_ix[doc['author']])
@@ -130,6 +130,7 @@ if __name__ == "__main__":
   parser.add_argument('inputCands', type=str, help='the input candidateJson')
   parser.add_argument('--filter_score', type=str, default=None,help='the input candidateJson')
   parser.add_argument('--filter_by', type=str, default='max',help='the input candidateJson')
+  parser.add_argument('--use_score', type=str, default='trans_score',help='the input candidateJson')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict
