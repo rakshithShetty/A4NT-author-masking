@@ -97,7 +97,10 @@ def main(params):
         char_to_ix = saved_model['char_to_ix']
         auth_to_ix = saved_model['auth_to_ix']
         ix_to_char = saved_model['ix_to_char']
-        ix_to_auth = saved_model['ix_to_auth']
+        if 'ix_to_auth' in saved_model:
+            ix_to_auth = saved_model['ix_to_auth']
+        else:
+            ix_to_auth = {auth_to_ix[a]:a for a in auth_to_ix}
 
     dp = DataProvider(cp_params)
     if params['softmax_scale']:
