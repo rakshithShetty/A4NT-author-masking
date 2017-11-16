@@ -82,8 +82,12 @@ def main(params):
             sent_accuracy_trans[auth_to_ix[doc['author']]] += float(trans_scr.argmax() == auth_to_ix[doc['author']])
             sent_count[auth_to_ix[doc['author']]] += 1.
 
-            doc_score_orig  += scr
-            doc_score_trans += trans_scr
+            if params['use_hard_vote']:
+                doc_score_orig  += (scr.max() == scr)
+                doc_score_trans += (trans_scr.max() == trans_scr)
+            else:
+                doc_score_orig  += scr
+                doc_score_trans += trans_scr
         doc_accuracy[auth_to_ix[doc['author']]] += float(doc_score_orig.argmax() == auth_to_ix[doc['author']])
         doc_accuracy_trans[auth_to_ix[doc['author']]] += float(doc_score_trans.argmax() == auth_to_ix[doc['author']])
         doc_count[auth_to_ix[doc['author']]] += 1.
@@ -92,7 +96,7 @@ def main(params):
         print 'Mean Meteor Score %.2f'%(np.array(meteor_score).mean())
     print 'Original data'
     print '-------------'
-    print 'Doc accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (doc_accuracy[0]/doc_count[0]),ix_to_auth[1], (doc_accuracy[1]/doc_count[1]) )
+    print 'Doc accuracy is %s : %.2f, %d , %s : %.2f, %d'%(ix_to_auth[0], (doc_accuracy[0]/doc_count[0]),doc_count[0],ix_to_auth[1], (doc_accuracy[1]/doc_count[1]),doc_count[1] )
     fp = doc_count[1]- doc_accuracy[1]
     recall = doc_accuracy[0]/doc_count[0]
     precision = doc_accuracy[0]/(doc_accuracy[0]+fp)
@@ -100,7 +104,7 @@ def main(params):
     print 'Precision is %.2f : Recall is %.2f , F1-score is %.2f'%(precision, recall, f1score)
 
     print '-----------------'
-    print 'Sent accuracy is %s : %.2f , %s : %.2f'%(ix_to_auth[0], (sent_accuracy[0]/sent_count[0]),ix_to_auth[1], (sent_accuracy[1]/sent_count[1]) )
+    print 'Sent accuracy is %s : %.2f , %d,  %s : %.2f, %d'%(ix_to_auth[0], (sent_accuracy[0]/sent_count[0]), sent_count[0],ix_to_auth[1], (sent_accuracy[1]/sent_count[1]), sent_count[1] )
     fp = sent_count[1]- sent_accuracy[1]
     recall = sent_accuracy[0]/sent_count[0]
     precision = sent_accuracy[0]/(sent_accuracy[0]+fp)
@@ -131,6 +135,7 @@ if __name__ == "__main__":
   parser.add_argument('--filter_score', type=str, default=None,help='the input candidateJson')
   parser.add_argument('--filter_by', type=str, default='max',help='the input candidateJson')
   parser.add_argument('--use_score', type=str, default='trans_score',help='the input candidateJson')
+  parser.add_argument('--use_hard_vote', type=int, default=0,help='the input candidateJson')
 
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict
