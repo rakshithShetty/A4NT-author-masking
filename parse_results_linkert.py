@@ -18,40 +18,30 @@ def main(params):
   sent_set = set()
   totalCount = 0.
   majority_votes = 0
-  votes_per_entry = defaultdict(lambda: defaultdict(int))
-  import ipdb; ipdb.set_trace()
+  votes_per_entry = defaultdict(list)
   for row in resreader:
       sid = int(row[sid_col])
       docid = int(row[docid_col])
       if params['linkert_scale']:
-        votes_per_entry[(docid,sid)][row[modelCols[int(row[ans_col])]]] += 1
-      else:
-        votes_per_entry[(docid,sid)][row[modelCols[int(row[ans_col][-1])-1]]] += 1
+        votes_per_entry[(docid,sid)].append(float(row[ans_col]))
       sent_set.add(row[ref_id].strip())
 
   totalCount = len(votes_per_entry)
   models = [row[mid] for mid in modelCols]
   print 'Models are ', models 
-  for k in votes_per_entry:
-      all_counts = np.array([votes_per_entry[k][mid] if mid in votes_per_entry[k] else 0 for mid in models])
-      max_count = all_counts.max()
-      #Check for uniqueness of maximum
-      if (all_counts==max_count).sum() == 1:# and (params['majority_vote'] ==1):
-        resDict[models[all_counts.argmax()]] += 1
-        majority_votes += 1
-      else:
-          print all_counts
-      #elif params['majority_vote'] == 0:
-      #  for i in xrange(len(all_counts)):
-      #      resDict[models[all_counts.argmax()]] += all_counts[i]
-      #  majority_votes += 1
+  all_scores = [item for k in votes_per_entry for item in votes_per_entry[k]]
+  all_means = [np.mean(votes_per_entry[k]) for k in votes_per_entry]
+  mean_score = np.mean(all_scores)
+  mean_mean_score = np.mean(all_means)
+  mean_std= np.std(all_means)
+  std_score = np.std(all_scores)
 
-
-  print 'Total Entries = %d, Majority count = %d '%(totalCount, majority_votes)
+  print 'Total Entries = %d, Mean Score = %.2f Std Score = %.2f '%(totalCount, mean_score, std_score)
+  print '               Mean Mean Score = %.2f Mean Std  = %.2f '%(mean_mean_score, mean_std)
   print 'Final Counts are :'
-  for k in resDict:
-    print'%s = %.2f, %d'%(k, 100. * float(resDict[k])/totalCount, resDict[k])
-    print'%s = %.2f, %d'%(k, 100. * float(resDict[k])/totalCount, resDict[k])
+  #for k in resDict:
+  #  print'%s = %.2f, %d'%(k, 100. * float(resDict[k])/totalCount, resDict[k])
+  #  print'%s = %.2f, %d'%(k, 100. * float(resDict[k])/totalCount, resDict[k])
   print '--------------------------------------------'
 
   if params['skipped_data']:
@@ -94,6 +84,8 @@ def main(params):
                 tot_bad_skips +=1
 
     tot_skipped = tot_skipped - tot_bad_skips
+    skip_scores = [5. for i in xrange(tot_skipped) for i in xrange(params['num_votes_per_sent'])]
+    skip_scores_mean = [5. for i in xrange(tot_skipped)]
 
     print '--------------------------------------------'
     print 'Total Skip Entries = %d, Skip majority count = %d '%(tot_skipped, tot_skip_wins)
@@ -104,6 +96,19 @@ def main(params):
     
     print 'Pecentage of ties = %.2f, total = %d'%(100.*(1.-float(tot_skip_wins + majority_votes)/(totalCount+tot_skipped)), totalCount+tot_skipped-tot_skip_wins - majority_votes)
     print skip_resDict_combos
+
+    all_scores = all_scores + skip_scores 
+    all_means = all_means + skip_scores_mean 
+    mean_score = np.mean(all_scores)
+    mean_mean_score = np.mean(all_means)
+    mean_std= np.std(all_means)
+    std_score = np.std(all_scores)
+
+    print 'Total Entries = %d, Mean Score = %.2f Std Score = %.2f '%(totalCount+tot_skipped, mean_score, std_score)
+    print '               Mean Mean Score = %.2f Mean Std  = %.2f '%(mean_mean_score, mean_std)
+    print 'Final Counts are :'
+    #for k in resDict:
+    #  print'%s = %.2f, %d'%(k, 100. * float(resDict[k])/totalCount, resDict[k])
 
 
 
@@ -123,3 +128,4 @@ if __name__ == "__main__":
   args = parser.parse_args()
   params = vars(args) # convert to ordinary dict
   main(params)
+
