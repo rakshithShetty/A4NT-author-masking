@@ -123,7 +123,7 @@ def eval_classify(dp, model, params, char_to_ix, auth_to_ix, split='val', max_do
         inps, targs, auths, lens = dp.prepare_data(b_data[0], char_to_ix, auth_to_ix)
         output, _ = model.forward_classify(inps, hidden_zero, compute_softmax=False,
                 predict_mode=True, lens=lens)
-        output = FN.log_softmax(output.contiguous())
+        output = FN.log_softmax(output.contiguous(), dim=-1)
         z = output.data.cpu().numpy()
         scores = z
         correct_textblock = correct_textblock + (scores.argmax(axis=1) == auths.numpy()).sum()

@@ -6,7 +6,7 @@ def get_classifier(params):
     from char_lstm import CharLstm
     from char_cnn import CharCNN
 
-    if params['modeltype'] == 'lstm':
+    if params.get('modeltype', 'lstm') == 'lstm':
         return CharLstm(params)
     else:
         return CharCNN(params)

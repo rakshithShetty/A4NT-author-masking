@@ -128,6 +128,8 @@ def main(params):
             lossClass = criterion(output, targets)
             if params['compression_layer']:
                 loss = lossClass + (model.compression_W.weight.norm(p=1,dim=1)).mean()
+            else:
+                loss = lossClass
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -204,7 +206,7 @@ if __name__ == "__main__":
   parser.add_argument('--maxpoolrnn', dest='maxpoolrnn', type=int, default=0, help='maximum sequence length')
   parser.add_argument('--atoms', dest='atoms', type=str, default='char', help='character or word model')
   parser.add_argument('--bidir', dest='bidir', type=int, default=0, help='Use Mlp layer to do the classification')
-  parser.add_argument('--compression_layer', dest='compression_layer', type=int, default=0, help='Use a compression layer') 
+  parser.add_argument('--compression_layer', dest='compression_layer', type=int, default=0, help='Use a compression layer')
 
   parser.add_argument('--decoder_mlp', dest='decoder_mlp', type=int, default=0, help='Use Mlp layer to do the classification')
   parser.add_argument('--decoder_cnn', dest='decoder_cnn', type=int, default=0, help='Use CNN layer to do the classification')

@@ -115,6 +115,7 @@ def main(params):
         confVal = svm_model.decision_function(bow_features_val)
     else:
         params['num_output_layers'] =len(auth_to_ix)
+        params['inp_size'] = params['pca']
         model = MLP_classifier(params)
         model.fit(bow_features_train, target_train, bow_features_val, target_val, params['epochs'], params['lr'], params['l2'])
         confTr = model.decision_function(bow_features_train)

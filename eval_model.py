@@ -3,6 +3,7 @@ import json
 import time
 import numpy as np
 import os
+from models.model_utils import get_classifier
 from models.char_lstm import CharLstm
 from models.char_translator import CharTranslator
 from collections import defaultdict
@@ -28,9 +29,9 @@ def main(params):
     if params['m_type'] == 'translator':
         model = CharTranslator(cp_params)
     else:
-        model = CharLstm(cp_params)
+        model = get_classifier(cp_params)
     # set to train mode, this activates dropout
-    model.eval()
+    #model.eval()
 
     # Restore saved checkpoint
     model.load_state_dict(saved_model['state_dict'])

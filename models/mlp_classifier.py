@@ -12,7 +12,7 @@ class MLP_classifier(nn.Module):
         #+1 is to allow padding index
         self.output_size = params.get('num_output_layers',205)
         self.hid_dims = params.get('hidden_widths',[])
-        self.inp_size = params.get('pca',-1)
+        self.inp_size = params.get('inp_size',-1)
 
         prev_size = self.inp_size
         self.hid_dims.append(self.output_size)

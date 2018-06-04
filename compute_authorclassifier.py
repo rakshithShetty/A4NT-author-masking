@@ -1,6 +1,7 @@
 from tqdm import tqdm
 import argparse
 import json
+import cPickle as pkl
 import time
 import numpy as np
 import os
@@ -8,6 +9,7 @@ from models.char_lstm import CharLstm
 import torch
 import torch.nn as nn
 from utils.data_provider import DataProvider
+from models.model_utils import get_classifier
 
 
 def main(params):
@@ -15,19 +17,22 @@ def main(params):
     eval_model = torch.load(params['evalmodel'])
     eval_params = eval_model['arch']
     eval_state = eval_model['state_dict']
-    modelEval = CharLstm(eval_params)
+    modelEval  = get_classifier(eval_params)#= CharLstm(eval_params)
 
     char_to_ix = eval_model['char_to_ix']
     auth_to_ix = eval_model['auth_to_ix']
     ix_to_char = eval_model['ix_to_char']
 
     dp = DataProvider(eval_params)
-    modelEval.eval()
+    #modelEval.eval()
     state = modelEval.state_dict()
     state.update(eval_state)
     modelEval.load_state_dict(state)
 
-    inps = json.load(open(params['inpfile'],'r'))
+    if params['inpfile'].split('.')[-1] == 'json':
+        inps = json.load(open(params['inpfile'],'r'))
+    elif params['inpfile'].split('.')[-1] == 'p':
+        inps = pkl.load(open(params['inpfile'],'r'))
     bsz = 100
 
     def process_batch(batch, featstr = 'sent_enc'):
@@ -56,7 +61,10 @@ def main(params):
         process_batch(batch, featstr = params['store_in'])
         del batch
         batch = []
-    json.dump(inps, open(params['inpfile'],'w'))
+    if params['inpfile'].split('.')[-1] == 'json':
+        json.dump(inps, open(params['inpfile'],'w'))
+    else:
+        pkl.dump(inps, open(params['inpfile'],'wb'))
 
 if __name__ == "__main__":
 

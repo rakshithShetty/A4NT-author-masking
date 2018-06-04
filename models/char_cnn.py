@@ -35,7 +35,7 @@ class CharCNN(nn.Module):
         #                             xrange(self.num_outputs)])
         self.dec_drop = nn.Dropout(p=params.get('drop_prob_decoder',0.25))
 
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=-1)
 
         self.init_weights()
         # we should move it out so that whether to do cuda or not should be upto the user.
