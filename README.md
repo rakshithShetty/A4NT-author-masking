@@ -11,6 +11,11 @@ Pre-trained translator models are available below:
 * [Gender translator](https://datasets.d2.mpi-inf.mpg.de/rakshith/a4nt_usenix/translate_models/gender_translator.pth.tar)
 * [Speech translator](https://datasets.d2.mpi-inf.mpg.de/rakshith/a4nt_usenix/translate_models/speechObamaAndTrump_translator.pth.tar) for Obama to Trump and vice-versa. 
 
+# Usage instructions
+Code is written in python 2.7 and uses pytorch 3.x library.
+
+More instructions coming soon
+
 # Bibtex
 If you find this code useful in your work, please cite the paper.
 ```
