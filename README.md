@@ -7,7 +7,7 @@ Pre-processed datasets used in our paper are available below in json format
 * [Blog dataset for age and gender](https://datasets.d2.mpi-inf.mpg.de/rakshith/a4nt_usenix/dataset/dataset_blog.json)
 
 Pre-trained translator models are available below:
-* [Age translator](https://datasets.d2.mpi-inf.mpg.de/rakshith/a4nt_usenix/translate_models/age_translator.pth.tar) for adult (23-40 years) to teenager(13-19 years) and vice-versa/
+* [Age translator](https://datasets.d2.mpi-inf.mpg.de/rakshith/a4nt_usenix/translate_models/age_translator.pth.tar) for adult (23-40 years) to teenager(13-19 years) and vice-versa.
 * [Gender translator](https://datasets.d2.mpi-inf.mpg.de/rakshith/a4nt_usenix/translate_models/gender_translator.pth.tar)
 * [Speech translator](https://datasets.d2.mpi-inf.mpg.de/rakshith/a4nt_usenix/translate_models/speechObamaAndTrump_translator.pth.tar) for Obama to Trump and vice-versa. 
 
